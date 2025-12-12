@@ -1,0 +1,338 @@
+package sant1ago.dev.suprim.jdbc;
+
+import sant1ago.dev.suprim.annotation.entity.Column;
+import sant1ago.dev.suprim.annotation.entity.Entity;
+import sant1ago.dev.suprim.annotation.entity.Id;
+import sant1ago.dev.suprim.annotation.entity.Table;
+
+import java.lang.reflect.Field;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Utility for entity reflection operations.
+ * Extracts IDs, sets field values, and converts entities to column maps.
+ * Uses caching for performance.
+ *
+ * <p>Uses {@link ReflectionUtils} for safe field access with public getter/setter preference.
+ */
+final class EntityReflector {
+
+    private static final Map<Class<?>, Field> ID_FIELD_CACHE = new ConcurrentHashMap<>();
+    private static final Map<Class<?>, Map<String, Field>> FIELD_CACHE = new ConcurrentHashMap<>();
+    private static final Map<Class<?>, EntityMeta> ENTITY_META_CACHE = new ConcurrentHashMap<>();
+
+    /**
+     * Cached entity metadata (table name, schema, ID column).
+     */
+    record EntityMeta(String tableName, String schema, String idColumn) {}
+
+    private EntityReflector() {
+        // Utility class
+    }
+
+    /**
+     * Extract the ID value from an entity.
+     * Finds the field annotated with @Id and returns its value.
+     *
+     * @param entity the entity instance
+     * @return the ID value
+     * @throws IllegalArgumentException if no @Id field found or cannot access it
+     */
+    static Object getId(Object entity) {
+        if (Objects.isNull(entity)) {
+            throw new IllegalArgumentException("Entity cannot be null");
+        }
+
+        Class<?> entityClass = entity.getClass();
+        Field idField = ID_FIELD_CACHE.computeIfAbsent(entityClass, EntityReflector::findIdField);
+
+        Object value = ReflectionUtils.getFieldValue(entity, idField.getName());
+        if (Objects.isNull(value)) {
+            throw new IllegalArgumentException("Entity ID cannot be null for class: " + entityClass.getName());
+        }
+        return value;
+    }
+
+    /**
+     * Set a field value on an entity by field name (not column name).
+     *
+     * @param entity the entity instance
+     * @param fieldName the Java field name
+     * @param value the value to set
+     * @throws IllegalArgumentException if field not found or cannot be set
+     */
+    static void setField(Object entity, String fieldName, Object value) {
+        if (Objects.isNull(entity)) {
+            throw new IllegalArgumentException("Entity cannot be null");
+        }
+        if (Objects.isNull(fieldName) || fieldName.isEmpty()) {
+            throw new IllegalArgumentException("Field name cannot be null or empty");
+        }
+
+        Class<?> entityClass = entity.getClass();
+        Map<String, Field> fieldMap = getFieldMap(entityClass);
+        Field field = fieldMap.get(fieldName);
+
+        if (Objects.isNull(field)) {
+            throw new IllegalArgumentException("Field not found: " + fieldName + " in class: " + entityClass.getName());
+        }
+
+        boolean success = ReflectionUtils.setFieldValue(entity, fieldName, value);
+        if (!success) {
+            throw new IllegalArgumentException("Cannot set field: " + fieldName + " on class: " + entityClass.getName() +
+                    ". Add a public setter or disable strict mode.");
+        }
+    }
+
+    /**
+     * Set a field value by column name (database column name).
+     *
+     * @param entity the entity instance
+     * @param columnName the database column name
+     * @param value the value to set
+     * @throws IllegalArgumentException if field not found or cannot be set
+     */
+    static void setFieldByColumnName(Object entity, String columnName, Object value) {
+        if (Objects.isNull(entity)) {
+            throw new IllegalArgumentException("Entity cannot be null");
+        }
+        if (Objects.isNull(columnName) || columnName.isEmpty()) {
+            throw new IllegalArgumentException("Column name cannot be null or empty");
+        }
+
+        Class<?> entityClass = entity.getClass();
+        Field field = findFieldByColumnName(entityClass, columnName);
+
+        if (Objects.isNull(field)) {
+            throw new IllegalArgumentException("No field found for column: " + columnName + " in class: " + entityClass.getName());
+        }
+
+        boolean success = ReflectionUtils.setFieldValue(entity, field.getName(), value);
+        if (!success) {
+            throw new IllegalArgumentException("Cannot set field for column: " + columnName + " on class: " + entityClass.getName() +
+                    ". Add a public setter or disable strict mode.");
+        }
+    }
+
+    /**
+     * Convert an entity to a column name -> value map.
+     * Only includes fields annotated with @Column.
+     *
+     * @param entity the entity instance
+     * @return map of column names to values (preserves insertion order)
+     * @throws IllegalArgumentException if reflection fails
+     */
+    static Map<String, Object> toColumnMap(Object entity) {
+        if (Objects.isNull(entity)) {
+            throw new IllegalArgumentException("Entity cannot be null");
+        }
+
+        Class<?> entityClass = entity.getClass();
+        Map<String, Object> columnMap = new LinkedHashMap<>();
+
+        for (Field field : getAllFields(entityClass)) {
+            Column column = field.getAnnotation(Column.class);
+            if (Objects.nonNull(column)) {
+                Object value = ReflectionUtils.getFieldValue(entity, field.getName());
+                if (Objects.nonNull(value)) {
+                    columnMap.put(column.name(), value);
+                }
+            }
+        }
+
+        return columnMap;
+    }
+
+    /**
+     * Get entity metadata (table name, schema, ID column) from annotations.
+     * Caches result for performance.
+     *
+     * @param entityClass the entity class
+     * @return entity metadata
+     * @throws IllegalArgumentException if class is not a valid entity
+     */
+    static EntityMeta getEntityMeta(Class<?> entityClass) {
+        if (Objects.isNull(entityClass)) {
+            throw new IllegalArgumentException("Entity class cannot be null");
+        }
+        return ENTITY_META_CACHE.computeIfAbsent(entityClass, EntityReflector::extractEntityMeta);
+    }
+
+    /**
+     * Extract entity metadata from annotations.
+     */
+    private static EntityMeta extractEntityMeta(Class<?> entityClass) {
+        String tableName = null;
+        String schema = null;
+
+        // Check @Entity annotation first (preferred)
+        Entity entityAnnotation = entityClass.getAnnotation(Entity.class);
+        if (Objects.nonNull(entityAnnotation)) {
+            if (!entityAnnotation.table().isEmpty()) {
+                tableName = entityAnnotation.table();
+            }
+            if (!entityAnnotation.schema().isEmpty()) {
+                schema = entityAnnotation.schema();
+            }
+        }
+
+        // Fall back to @Table annotation
+        if (Objects.isNull(tableName)) {
+            Table tableAnnotation = entityClass.getAnnotation(Table.class);
+            if (Objects.nonNull(tableAnnotation)) {
+                if (!tableAnnotation.name().isEmpty()) {
+                    tableName = tableAnnotation.name();
+                }
+                if (Objects.isNull(schema) && !tableAnnotation.schema().isEmpty()) {
+                    schema = tableAnnotation.schema();
+                }
+            }
+        }
+
+        // Default to snake_case class name if no annotation
+        if (Objects.isNull(tableName)) {
+            tableName = ReflectionUtils.toSnakeCase(entityClass.getSimpleName());
+        }
+
+        // Get ID column name
+        String idColumn = null;
+        for (Field field : getAllFields(entityClass)) {
+            if (field.isAnnotationPresent(Id.class)) {
+                Column columnAnnotation = field.getAnnotation(Column.class);
+                if (Objects.nonNull(columnAnnotation) && !columnAnnotation.name().isEmpty()) {
+                    idColumn = columnAnnotation.name();
+                } else {
+                    idColumn = ReflectionUtils.toSnakeCase(field.getName());
+                }
+                break;
+            }
+        }
+
+        if (Objects.isNull(idColumn)) {
+            throw new IllegalArgumentException(
+                "No @Id field found in class: " + entityClass.getName() +
+                ". Entity must have a field annotated with @Id."
+            );
+        }
+
+        return new EntityMeta(tableName, schema, idColumn);
+    }
+
+    /**
+     * Find the field annotated with @Id.
+     */
+    private static Field findIdField(Class<?> entityClass) {
+        for (Field field : getAllFields(entityClass)) {
+            if (field.isAnnotationPresent(Id.class)) {
+                return field;
+            }
+        }
+        throw new IllegalArgumentException("No @Id field found in class: " + entityClass.getName());
+    }
+
+    /**
+     * Find field by database column name.
+     */
+    private static Field findFieldByColumnName(Class<?> entityClass, String columnName) {
+        for (Field field : getAllFields(entityClass)) {
+            Column column = field.getAnnotation(Column.class);
+            if (Objects.nonNull(column) && column.name().equals(columnName)) {
+                return field;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Get field value by column name (database column name).
+     *
+     * @param entity     the entity instance
+     * @param columnName the database column name
+     * @return the field value, or null if not found
+     */
+    static Object getFieldByColumnName(Object entity, String columnName) {
+        if (Objects.isNull(entity)) {
+            return null;
+        }
+        if (Objects.isNull(columnName) || columnName.isEmpty()) {
+            return null;
+        }
+
+        Class<?> entityClass = entity.getClass();
+        Field field = findFieldByColumnName(entityClass, columnName);
+
+        if (Objects.isNull(field)) {
+            return null;
+        }
+
+        return ReflectionUtils.getFieldValue(entity, field.getName());
+    }
+
+    /**
+     * Get all fields for a class (including inherited fields).
+     */
+    private static Field[] getAllFields(Class<?> clazz) {
+        return clazz.getDeclaredFields();
+    }
+
+    /**
+     * Build and cache field map for a class.
+     */
+    private static Map<String, Field> getFieldMap(Class<?> entityClass) {
+        return FIELD_CACHE.computeIfAbsent(entityClass, clazz -> {
+            Map<String, Field> map = new LinkedHashMap<>();
+            for (Field field : getAllFields(clazz)) {
+                map.put(field.getName(), field);
+            }
+            return map;
+        });
+    }
+
+    /**
+     * Create an entity instance from a map of column names to values.
+     * Only sets fields that have corresponding entries in the attribute map.
+     *
+     * @param entityClass the entity class to instantiate
+     * @param attributes map of column names to values
+     * @param <T> entity type
+     * @return new entity instance with fields set from the map
+     * @throws IllegalArgumentException if entity cannot be instantiated or fields cannot be set
+     */
+    static <T> T fromMap(Class<T> entityClass, Map<String, Object> attributes) {
+        if (Objects.isNull(entityClass)) {
+            throw new IllegalArgumentException("Entity class cannot be null");
+        }
+        if (Objects.isNull(attributes)) {
+            throw new IllegalArgumentException("Attributes map cannot be null");
+        }
+
+        // Create new instance
+        T entity;
+        try {
+            entity = entityClass.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Cannot instantiate entity class: " + entityClass.getName() +
+                ". Ensure it has a no-arg constructor.", e);
+        }
+
+        // Set fields from attribute map
+        for (Map.Entry<String, Object> entry : attributes.entrySet()) {
+            String columnName = entry.getKey();
+            Object value = entry.getValue();
+
+            Field field = findFieldByColumnName(entityClass, columnName);
+            if (Objects.nonNull(field)) {
+                boolean success = ReflectionUtils.setFieldValue(entity, field.getName(), value);
+                if (!success && ReflectionUtils.isStrictMode()) {
+                    throw new IllegalArgumentException("Cannot set field for column: " + columnName +
+                        " on class: " + entityClass.getName() + ". Add a public setter.");
+                }
+            }
+        }
+
+        return entity;
+    }
+}
