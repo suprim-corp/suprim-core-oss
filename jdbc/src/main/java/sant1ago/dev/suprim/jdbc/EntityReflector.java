@@ -6,6 +6,7 @@ import sant1ago.dev.suprim.annotation.entity.Id;
 import sant1ago.dev.suprim.annotation.entity.Table;
 import sant1ago.dev.suprim.annotation.type.GenerationType;
 import sant1ago.dev.suprim.annotation.type.IdGenerator;
+import sant1ago.dev.suprim.casey.Casey;
 
 import java.lang.reflect.Field;
 import java.util.*;
@@ -237,7 +238,7 @@ final class EntityReflector {
         if (Objects.nonNull(columnAnnotation) && !columnAnnotation.name().isEmpty()) {
             columnName = columnAnnotation.name();
         } else {
-            columnName = ReflectionUtils.toSnakeCase(idField.getName());
+            columnName = Casey.toSnakeCase(idField.getName());
         }
 
         return new IdMeta(
@@ -316,7 +317,7 @@ final class EntityReflector {
 
         // Default to snake_case class name if no annotation
         if (Objects.isNull(tableName)) {
-            tableName = ReflectionUtils.toSnakeCase(entityClass.getSimpleName());
+            tableName = Casey.toSnakeCase(entityClass.getSimpleName());
         }
 
         // Get ID column name
@@ -327,7 +328,7 @@ final class EntityReflector {
                 if (Objects.nonNull(columnAnnotation) && !columnAnnotation.name().isEmpty()) {
                     idColumn = columnAnnotation.name();
                 } else {
-                    idColumn = ReflectionUtils.toSnakeCase(field.getName());
+                    idColumn = Casey.toSnakeCase(field.getName());
                 }
                 break;
             }
@@ -361,7 +362,7 @@ final class EntityReflector {
     private static Field findFieldByColumnName(Class<?> entityClass, String columnName) {
         for (Field field : getAllFields(entityClass)) {
             Column column = field.getAnnotation(Column.class);
-            if (Objects.nonNull(column) && column.name().equals(columnName)) {
+            if (Objects.nonNull(column) && column.name().equalsIgnoreCase(columnName)) {
                 return field;
             }
         }

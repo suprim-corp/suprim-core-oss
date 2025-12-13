@@ -4,6 +4,7 @@ import sant1ago.dev.suprim.annotation.entity.Column;
 import sant1ago.dev.suprim.annotation.entity.Id;
 import sant1ago.dev.suprim.annotation.type.GenerationType;
 import sant1ago.dev.suprim.annotation.type.IdGenerator;
+import sant1ago.dev.suprim.casey.Casey;
 
 import java.lang.reflect.Field;
 import java.util.Map;
@@ -101,7 +102,7 @@ public final class IdMetadata {
                 Column columnAnnotation = field.getAnnotation(Column.class);
                 String columnName = Objects.nonNull(columnAnnotation) && !columnAnnotation.name().isEmpty()
                     ? columnAnnotation.name()
-                    : toSnakeCase(field.getName());
+                    : Casey.toSnakeCase(field.getName());
 
                 return new Info(
                     field.getName(),
@@ -128,19 +129,4 @@ public final class IdMetadata {
         });
     }
 
-    private static String toSnakeCase(String camelCase) {
-        StringBuilder result = new StringBuilder();
-        for (int i = 0; i < camelCase.length(); i++) {
-            char c = camelCase.charAt(i);
-            if (Character.isUpperCase(c)) {
-                if (i > 0) {
-                    result.append('_');
-                }
-                result.append(Character.toLowerCase(c));
-            } else {
-                result.append(c);
-            }
-        }
-        return result.toString();
-    }
 }

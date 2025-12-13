@@ -1,6 +1,7 @@
 package sant1ago.dev.suprim.jdbc;
 
 import sant1ago.dev.suprim.annotation.entity.Column;
+import sant1ago.dev.suprim.casey.Casey;
 import sant1ago.dev.suprim.core.type.TypeUtils;
 import sant1ago.dev.suprim.jdbc.exception.MappingException;
 
@@ -8,13 +9,9 @@ import java.lang.reflect.*;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -140,12 +137,12 @@ public final class EntityMapper<T> implements RowMapper<T> {
                 Integer columnIndex = columnIndices.get(mapping.columnName.toLowerCase());
                 if (Objects.nonNull(columnIndex)) {
                     try {
-                        args[i] = getValueFromResultSet(rs, columnIndex, mapping.fieldType);
+                        args[i] = ResultSetTypeConverter.getValue(rs, columnIndex, mapping.fieldType);
                     } catch (ClassCastException e) {
                         throw MappingException.conversionFailed(targetClass, mapping.columnName, mapping.fieldType, e);
                     }
                 } else {
-                    args[i] = getDefaultValue(mapping.fieldType);
+                    args[i] = ResultSetTypeConverter.getDefaultValue(mapping.fieldType);
                 }
             }
 
@@ -174,7 +171,7 @@ public final class EntityMapper<T> implements RowMapper<T> {
                 Integer columnIndex = columnIndices.get(mapping.columnName.toLowerCase());
                 if (Objects.nonNull(columnIndex)) {
                     try {
-                        Object value = getValueFromResultSet(rs, columnIndex, mapping.fieldType);
+                        Object value = ResultSetTypeConverter.getValue(rs, columnIndex, mapping.fieldType);
                         boolean success = ReflectionUtils.setFieldValue(instance, mapping.field.getName(), value);
                         if (!success) {
                             throw MappingException.fieldAccessError(targetClass, mapping.field.getName(),
@@ -202,142 +199,6 @@ public final class EntityMapper<T> implements RowMapper<T> {
             return indices;
         }
 
-        private Object getValueFromResultSet(ResultSet rs, int index, Class<?> type) throws SQLException {
-            Object value = rs.getObject(index);
-
-            if (rs.wasNull()) {
-                return getDefaultValue(type);
-            }
-
-            // Handle type conversions
-            if (type == boolean.class || type == Boolean.class) {
-                return convertToBoolean(value);
-            }
-            if (value instanceof Number number) {
-                if (type == int.class || type == Integer.class) {
-                    return number.intValue();
-                }
-                if (type == long.class || type == Long.class) {
-                    return number.longValue();
-                }
-                if (type == double.class || type == Double.class) {
-                    return number.doubleValue();
-                }
-                if (type == float.class || type == Float.class) {
-                    return number.floatValue();
-                }
-                if (type == short.class || type == Short.class) {
-                    return number.shortValue();
-                }
-                if (type == byte.class || type == Byte.class) {
-                    return number.byteValue();
-                }
-            }
-
-            // Handle java.time type conversions from JDBC types
-            if (type == LocalDateTime.class) {
-                return convertToLocalDateTime(value);
-            }
-            if (type == LocalDate.class) {
-                return convertToLocalDate(value);
-            }
-            if (type == Instant.class) {
-                return convertToInstant(value);
-            }
-            if (type == OffsetDateTime.class) {
-                return convertToOffsetDateTime(value);
-            }
-
-            return value;
-        }
-
-        private LocalDateTime convertToLocalDateTime(Object value) {
-            if (value instanceof LocalDateTime ldt) {
-                return ldt;
-            }
-            if (value instanceof Timestamp ts) {
-                return ts.toLocalDateTime();
-            }
-            if (value instanceof java.sql.Date date) {
-                return date.toLocalDate().atStartOfDay();
-            }
-            if (value instanceof java.util.Date date) {
-                return LocalDateTime.ofInstant(date.toInstant(), ZoneId.systemDefault());
-            }
-            return null;
-        }
-
-        private LocalDate convertToLocalDate(Object value) {
-            if (value instanceof LocalDate ld) {
-                return ld;
-            }
-            if (value instanceof java.sql.Date date) {
-                return date.toLocalDate();
-            }
-            if (value instanceof Timestamp ts) {
-                return ts.toLocalDateTime().toLocalDate();
-            }
-            if (value instanceof java.util.Date date) {
-                return LocalDateTime.ofInstant(date.toInstant(), ZoneId.systemDefault()).toLocalDate();
-            }
-            return null;
-        }
-
-        private Instant convertToInstant(Object value) {
-            if (value instanceof Instant instant) {
-                return instant;
-            }
-            if (value instanceof Timestamp ts) {
-                return ts.toInstant();
-            }
-            if (value instanceof java.util.Date date) {
-                return date.toInstant();
-            }
-            return null;
-        }
-
-        private OffsetDateTime convertToOffsetDateTime(Object value) {
-            if (value instanceof OffsetDateTime odt) {
-                return odt;
-            }
-            if (value instanceof Timestamp ts) {
-                return OffsetDateTime.ofInstant(ts.toInstant(), ZoneId.systemDefault());
-            }
-            if (value instanceof java.util.Date date) {
-                return OffsetDateTime.ofInstant(date.toInstant(), ZoneId.systemDefault());
-            }
-            return null;
-        }
-
-        private boolean convertToBoolean(Object value) {
-            if (value instanceof Boolean bool) {
-                return bool;
-            }
-            if (value instanceof Number number) {
-                return number.intValue() != 0;
-            }
-            if (value instanceof String s) {
-                String lower = s.toLowerCase();
-                return "true".equals(lower) || "t".equals(lower) || "yes".equals(lower)
-                        || "y".equals(lower) || "1".equals(lower);
-            }
-            return false;
-        }
-
-        private Object getDefaultValue(Class<?> type) {
-            if (type.isPrimitive()) {
-                if (type == boolean.class) return false;
-                if (type == int.class) return 0;
-                if (type == long.class) return 0L;
-                if (type == double.class) return 0.0;
-                if (type == float.class) return 0.0f;
-                if (type == short.class) return (short) 0;
-                if (type == byte.class) return (byte) 0;
-                if (type == char.class) return '\0';
-            }
-            return null;
-        }
-
         private FieldMapping[] buildRecordMappings(Class<T> recordClass) {
             RecordComponent[] components = recordClass.getRecordComponents();
             FieldMapping[] mappings = new FieldMapping[components.length];
@@ -352,16 +213,23 @@ public final class EntityMapper<T> implements RowMapper<T> {
         }
 
         private FieldMapping[] buildClassMappings(Class<T> clazz) {
-            Field[] fields = clazz.getDeclaredFields();
-            FieldMapping[] mappings = new FieldMapping[fields.length];
+            List<FieldMapping> mappingList = new ArrayList<>();
 
-            for (int i = 0; i < fields.length; i++) {
-                Field field = fields[i];
-                String columnName = resolveColumnName(field);
-                mappings[i] = new FieldMapping(field, columnName, field.getType());
+            // Traverse class hierarchy to include parent class fields
+            Class<?> current = clazz;
+            while (Objects.nonNull(current) && current != Object.class) {
+                for (Field field : current.getDeclaredFields()) {
+                    // Skip static and synthetic fields
+                    if (Modifier.isStatic(field.getModifiers()) || field.isSynthetic()) {
+                        continue;
+                    }
+                    String columnName = resolveColumnName(field);
+                    mappingList.add(new FieldMapping(field, columnName, field.getType()));
+                }
+                current = current.getSuperclass();
             }
 
-            return mappings;
+            return mappingList.toArray(new FieldMapping[0]);
         }
 
         private String resolveColumnName(RecordComponent component) {
@@ -369,7 +237,7 @@ public final class EntityMapper<T> implements RowMapper<T> {
             if (Objects.nonNull(column) && !column.name().isEmpty()) {
                 return column.name();
             }
-            return toSnakeCase(component.getName());
+            return Casey.toSnakeCase(component.getName());
         }
 
         private String resolveColumnName(Field field) {
@@ -377,23 +245,7 @@ public final class EntityMapper<T> implements RowMapper<T> {
             if (Objects.nonNull(column) && !column.name().isEmpty()) {
                 return column.name();
             }
-            return toSnakeCase(field.getName());
-        }
-
-        private String toSnakeCase(String name) {
-            StringBuilder result = new StringBuilder();
-            for (int i = 0; i < name.length(); i++) {
-                char c = name.charAt(i);
-                if (Character.isUpperCase(c)) {
-                    if (i > 0) {
-                        result.append('_');
-                    }
-                    result.append(Character.toLowerCase(c));
-                } else {
-                    result.append(c);
-                }
-            }
-            return result.toString();
+            return Casey.toSnakeCase(field.getName());
         }
 
         private Constructor<T> findRecordConstructor(Class<T> recordClass) {

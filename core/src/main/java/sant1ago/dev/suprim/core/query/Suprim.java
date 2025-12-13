@@ -3,6 +3,7 @@ package sant1ago.dev.suprim.core.query;
 import sant1ago.dev.suprim.annotation.entity.Column;
 import sant1ago.dev.suprim.annotation.entity.Entity;
 import sant1ago.dev.suprim.annotation.type.SqlType;
+import sant1ago.dev.suprim.casey.Casey;
 import sant1ago.dev.suprim.core.type.Aggregate;
 import sant1ago.dev.suprim.core.type.Coalesce;
 import sant1ago.dev.suprim.core.type.Expression;
@@ -65,7 +66,7 @@ public final class Suprim {
     public static String table(Class<?> entityClass) {
         Entity entity = getEntity(entityClass);
         String table = entity.table();
-        return table.isEmpty() ? toSnakeCase(entityClass.getSimpleName()) : table;
+        return table.isEmpty() ? Casey.toSnakeCase(entityClass.getSimpleName()) : table;
     }
 
     /**
@@ -104,7 +105,7 @@ public final class Suprim {
                 if (nonNull(col) && !col.name().isEmpty()) {
                     return col.name();
                 }
-                return toSnakeCase(fieldName);
+                return Casey.toSnakeCase(fieldName);
             } catch (NoSuchFieldException e) {
                 throw new IllegalArgumentException("Field not found: " + fieldName + " in " + entityClass.getName());
             }
@@ -230,20 +231,6 @@ public final class Suprim {
             }
             return entity;
         });
-    }
-
-    private static String toSnakeCase(String name) {
-        StringBuilder result = new StringBuilder();
-        for (int i = 0; i < name.length(); i++) {
-            char c = name.charAt(i);
-            if (Character.isUpperCase(c)) {
-                if (i > 0) result.append('_');
-                result.append(Character.toLowerCase(c));
-            } else {
-                result.append(c);
-            }
-        }
-        return result.toString();
     }
 
     // ==================== SELECT ====================
