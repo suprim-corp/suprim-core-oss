@@ -163,21 +163,16 @@ public sealed interface SelectItem permits SelectItem.ColumnItem, SelectItem.Ali
         public String toSql(SqlDialect dialect) {
             StringBuilder sql = new StringBuilder();
 
-            // EXISTS wraps differently: EXISTS(SELECT 1 ...) AS alias
-            boolean isExists = subqueryType == SubqueryType.EXISTS;
-            if (isExists) {
-                sql.append("EXISTS(SELECT 1");
-            } else {
-                sql.append("(SELECT ");
-                switch (subqueryType) {
-                    case COUNT -> sql.append("COUNT(*)");
-                    case SUM -> sql.append("SUM(").append(column.getName()).append(")");
-                    case MAX -> sql.append("MAX(").append(column.getName()).append(")");
-                    case MIN -> sql.append("MIN(").append(column.getName()).append(")");
-                    case AVG -> sql.append("AVG(").append(column.getName()).append(")");
-                    default -> {}
-                }
-            }
+            // Handle all subquery types - use switch expression for exhaustiveness check
+            String prefix = switch (subqueryType) {
+                case EXISTS -> "EXISTS(SELECT 1";
+                case COUNT -> "(SELECT COUNT(*)";
+                case SUM -> "(SELECT SUM(" + column.getName() + ")";
+                case MAX -> "(SELECT MAX(" + column.getName() + ")";
+                case MIN -> "(SELECT MIN(" + column.getName() + ")";
+                case AVG -> "(SELECT AVG(" + column.getName() + ")";
+            };
+            sql.append(prefix);
 
             sql.append(" FROM ").append(relation.getExistsFromTable());
 

@@ -2,14 +2,16 @@ package sant1ago.dev.suprim.core.type;
 
 import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.core.dialect.UnsupportedDialectFeatureException;
+import sant1ago.dev.suprim.core.query.SelectBuilder;
 
 import java.util.Objects;
+import java.util.function.Function;
 
 /**
  * Boolean predicate for WHERE clauses.
  * Supports composition through AND/OR/NOT operations.
  */
-public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.CompositePredicate, Predicate.NotPredicate, Predicate.RawPredicate, SubqueryExpression.ExistsPredicate {
+public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.CompositePredicate, Predicate.NotPredicate, Predicate.RawPredicate, Predicate.RelationExistsPredicate, Predicate.RelationCountPredicate, SubqueryExpression.ExistsPredicate {
 
     /**
      * Combine with AND: this AND other
@@ -165,6 +167,98 @@ public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.C
         @Override
         public String toSql(SqlDialect dialect) {
             return sql;
+        }
+    }
+
+    /**
+     * Deferred EXISTS predicate for relation queries.
+     * SQL generation happens at toSql() time with the correct dialect.
+     *
+     * @param relation the relationship to check
+     * @param constraint optional additional constraints
+     * @param negated true for NOT EXISTS
+     * @param ownerTableName the owner table name for correlation
+     */
+    record RelationExistsPredicate(
+            Relation<?, ?> relation,
+            Function<SelectBuilder, SelectBuilder> constraint,
+            boolean negated,
+            String ownerTableName
+    ) implements Predicate {
+
+        @Override
+        public String toSql(SqlDialect dialect) {
+            StringBuilder sql = new StringBuilder();
+            sql.append(negated ? "NOT EXISTS (SELECT 1" : "EXISTS (SELECT 1");
+            sql.append(" FROM ").append(relation.getExistsFromTable());
+
+            // For BelongsToMany, add pivot table join
+            String pivotJoin = relation.getPivotJoinForExists();
+            if (Objects.nonNull(pivotJoin)) {
+                sql.append(" ").append(pivotJoin);
+            }
+
+            sql.append(" WHERE ").append(relation.getExistsCondition(ownerTableName));
+
+            // Apply additional constraints with correct dialect
+            if (Objects.nonNull(constraint)) {
+                SelectBuilder subBuilder = new SelectBuilder(java.util.List.of());
+                subBuilder = constraint.apply(subBuilder);
+                Predicate whereClause = subBuilder.getWhereClause();
+                if (Objects.nonNull(whereClause)) {
+                    sql.append(" AND ").append(whereClause.toSql(dialect));
+                }
+            }
+
+            sql.append(")");
+            return sql.toString();
+        }
+    }
+
+    /**
+     * Deferred COUNT predicate for relation queries (e.g., has 5 posts).
+     * SQL generation happens at toSql() time with the correct dialect.
+     *
+     * @param relation the relationship to count
+     * @param operator comparison operator (=, >=, >, etc.)
+     * @param count the count to compare against
+     * @param constraint optional additional constraints
+     * @param ownerTableName the owner table name for correlation
+     */
+    record RelationCountPredicate(
+            Relation<?, ?> relation,
+            String operator,
+            int count,
+            Function<SelectBuilder, SelectBuilder> constraint,
+            String ownerTableName
+    ) implements Predicate {
+
+        @Override
+        public String toSql(SqlDialect dialect) {
+            StringBuilder sql = new StringBuilder();
+            sql.append("(SELECT COUNT(*)");
+            sql.append(" FROM ").append(relation.getExistsFromTable());
+
+            // For BelongsToMany, add pivot table join
+            String pivotJoin = relation.getPivotJoinForExists();
+            if (Objects.nonNull(pivotJoin)) {
+                sql.append(" ").append(pivotJoin);
+            }
+
+            sql.append(" WHERE ").append(relation.getExistsCondition(ownerTableName));
+
+            // Apply additional constraints with correct dialect
+            if (Objects.nonNull(constraint)) {
+                SelectBuilder subBuilder = new SelectBuilder(java.util.List.of());
+                subBuilder = constraint.apply(subBuilder);
+                Predicate whereClause = subBuilder.getWhereClause();
+                if (Objects.nonNull(whereClause)) {
+                    sql.append(" AND ").append(whereClause.toSql(dialect));
+                }
+            }
+
+            sql.append(") ").append(operator).append(" ").append(count);
+            return sql.toString();
         }
     }
 }

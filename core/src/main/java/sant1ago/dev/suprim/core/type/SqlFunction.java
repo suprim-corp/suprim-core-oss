@@ -158,19 +158,17 @@ public final class SqlFunction<V> implements Expression<V> {
 
     @Override
     public String toSql(SqlDialect dialect) {
-        StringBuilder sb = new StringBuilder();
-
-        switch (type) {
-            case BUILTIN -> sb.append(renderBuiltinFunction(dialect));
-            case CUSTOM -> sb.append(renderCustomFunction(dialect));
-            case RAW -> sb.append(renderRawExpression(dialect));
-        }
+        String rendered = switch (type) {
+            case BUILTIN -> renderBuiltinFunction(dialect);
+            case CUSTOM -> renderCustomFunction(dialect);
+            case RAW -> renderRawExpression(dialect);
+        };
 
         if (nonNull(alias)) {
-            sb.append(" AS ").append(dialect.quoteIdentifier(alias));
+            return rendered + " AS " + dialect.quoteIdentifier(alias);
         }
 
-        return sb.toString();
+        return rendered;
     }
 
     private String renderBuiltinFunction(SqlDialect dialect) {

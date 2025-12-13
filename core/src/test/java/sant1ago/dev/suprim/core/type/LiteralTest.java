@@ -315,4 +315,35 @@ class LiteralTest {
 
         assertEquals("42", sql);
     }
+
+    @Test
+    @DisplayName("ListLiteral with null values returns empty string")
+    void testListLiteralNullValues() {
+        ListLiteral<Integer> listLiteral = new ListLiteral<>(null, Integer.class);
+        String sql = listLiteral.toSql(PostgreSqlDialect.INSTANCE);
+
+        assertEquals("", sql);
+    }
+
+    @Test
+    @DisplayName("ListLiteral getValueType returns element type")
+    void testListLiteralGetValueType() {
+        ListLiteral<String> listLiteral = new ListLiteral<>(
+            java.util.List.of("a", "b"),
+            String.class
+        );
+        assertEquals(String.class, listLiteral.getValueType());
+    }
+
+    // ==================== FALLBACK LITERAL ====================
+
+    @Test
+    @DisplayName("UUID literal uses fallback to quoteString")
+    void testUuidLiteralFallback() {
+        java.util.UUID uuid = java.util.UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
+        Literal<java.util.UUID> literal = new Literal<>(uuid, java.util.UUID.class);
+        String sql = literal.toSql(PostgreSqlDialect.INSTANCE);
+
+        assertEquals("'550e8400-e29b-41d4-a716-446655440000'", sql);
+    }
 }

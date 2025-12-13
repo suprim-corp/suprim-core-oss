@@ -49,7 +49,7 @@ public final class SelectBuilder {
     private final List<EagerLoadSpec> eagerLoads = new ArrayList<>();
     private final Set<String> withoutRelations = new HashSet<>();
 
-    SelectBuilder(List<? extends Expression<?>> expressions) {
+    public SelectBuilder(List<? extends Expression<?>> expressions) {
         Objects.requireNonNull(expressions, "expressions cannot be null");
         for (Expression<?> expr : expressions) {
             this.selectItems.add(SelectItem.of(expr));
@@ -385,8 +385,8 @@ public final class SelectBuilder {
      * }</pre>
      */
     public SelectBuilder whereHas(Relation<?, ?> relation, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
-        String existsSql = buildExistsSubquery(relation, constraint, false);
-        Predicate existsPredicate = new Predicate.RawPredicate("EXISTS (" + existsSql + ")");
+        String ownerTable = getOwnerTableName(relation);
+        Predicate existsPredicate = new Predicate.RelationExistsPredicate(relation, constraint, false, ownerTable);
 
         if (isNull(this.whereClause)) {
             this.whereClause = existsPredicate;
@@ -411,8 +411,8 @@ public final class SelectBuilder {
      * Filter by non-existence of related records with additional constraints.
      */
     public SelectBuilder whereDoesntHave(Relation<?, ?> relation, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
-        String existsSql = buildExistsSubquery(relation, constraint, false);
-        Predicate notExistsPredicate = new Predicate.RawPredicate("NOT EXISTS (" + existsSql + ")");
+        String ownerTable = getOwnerTableName(relation);
+        Predicate notExistsPredicate = new Predicate.RelationExistsPredicate(relation, constraint, true, ownerTable);
 
         if (isNull(this.whereClause)) {
             this.whereClause = notExistsPredicate;
@@ -437,8 +437,8 @@ public final class SelectBuilder {
      * Filter by count of related records with additional constraints.
      */
     public SelectBuilder has(Relation<?, ?> relation, String operator, int count, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
-        String countSql = buildExistsSubquery(relation, constraint, true);
-        Predicate countPredicate = new Predicate.RawPredicate("(" + countSql + ") " + operator + " " + count);
+        String ownerTable = getOwnerTableName(relation);
+        Predicate countPredicate = new Predicate.RelationCountPredicate(relation, operator, count, constraint, ownerTable);
 
         if (isNull(this.whereClause)) {
             this.whereClause = countPredicate;
@@ -599,43 +599,6 @@ public final class SelectBuilder {
         String ownerTable = getOwnerTableName(relation);
         this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.EXISTS, relation, null, constraint, alias, ownerTable));
         return this;
-    }
-
-    /**
-     * Build EXISTS or COUNT subquery for a relationship (used in WHERE clause predicates).
-     * Note: Constraint SQL uses PostgreSQL dialect by default - for cross-dialect support,
-     * use deferred predicate generation at build() time.
-     */
-    private String buildExistsSubquery(Relation<?, ?> relation, java.util.function.Function<SelectBuilder, SelectBuilder> constraint, boolean isCount) {
-        StringBuilder sql = new StringBuilder();
-        sql.append("SELECT ");
-        sql.append(isCount ? "COUNT(*)" : "1");
-        sql.append(" FROM ");
-        sql.append(relation.getExistsFromTable());
-
-        // For BelongsToMany, add pivot table join
-        String pivotJoin = relation.getPivotJoinForExists();
-        if (nonNull(pivotJoin)) {
-            sql.append(" ").append(pivotJoin);
-        }
-
-        // Get the owner table name for the correlation
-        String ownerTable = getOwnerTableName(relation);
-        sql.append(" WHERE ");
-        sql.append(relation.getExistsCondition(ownerTable));
-
-        // Apply additional constraints if provided
-        // TODO: For full dialect support, defer constraint SQL to build() time
-        if (nonNull(constraint)) {
-            SelectBuilder subBuilder = new SelectBuilder(List.of());
-            subBuilder = constraint.apply(subBuilder);
-            if (nonNull(subBuilder.whereClause)) {
-                sql.append(" AND ");
-                sql.append(subBuilder.whereClause.toSql(PostgreSqlDialect.INSTANCE));
-            }
-        }
-
-        return sql.toString();
     }
 
     /**
@@ -1372,9 +1335,9 @@ public final class SelectBuilder {
 
     /**
      * Get the current WHERE clause predicate.
-     * Package-private for use by SelectItem.SubqueryItem.
+     * Used by deferred predicate types for dialect-aware SQL generation.
      */
-    Predicate getWhereClause() {
+    public Predicate getWhereClause() {
         return whereClause;
     }
 

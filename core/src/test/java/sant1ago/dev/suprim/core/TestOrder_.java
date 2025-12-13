@@ -1,6 +1,7 @@
 package sant1ago.dev.suprim.core;
 
 import sant1ago.dev.suprim.core.type.ComparableColumn;
+import sant1ago.dev.suprim.core.type.Relation;
 import sant1ago.dev.suprim.core.type.StringColumn;
 import sant1ago.dev.suprim.core.type.Table;
 
@@ -28,6 +29,11 @@ public final class TestOrder_ {
 
     public static final ComparableColumn<TestOrder, LocalDateTime> CREATED_AT =
         new ComparableColumn<>(TABLE, "created_at", LocalDateTime.class, "TIMESTAMP");
+
+    // Relations - used by PathResolver tests
+    public static final Relation<TestOrder, TestUser> USER = Relation.belongsTo(
+        TABLE, TestUser_.TABLE, "user_id", "id", false, false, "user"
+    );
 
     private TestOrder_() {
         // Prevent instantiation

@@ -213,4 +213,18 @@ class UpdateBuilderTest {
         assertTrue(sql.contains("WHERE"));
         assertTrue(sql.contains("IN"));
     }
+
+    @Test
+    @DisplayName("and() without prior where() sets whereClause")
+    void testAndWithoutPriorWhere() {
+        QueryResult result = Suprim.update(TestUser_.TABLE)
+            .set(TestUser_.IS_ACTIVE, false)
+            .and(TestUser_.AGE.lt(18))
+            .build();
+
+        String sql = result.sql();
+        assertTrue(sql.contains("UPDATE \"users\""));
+        assertTrue(sql.contains("WHERE"));
+        assertTrue(sql.contains("age"));
+    }
 }
