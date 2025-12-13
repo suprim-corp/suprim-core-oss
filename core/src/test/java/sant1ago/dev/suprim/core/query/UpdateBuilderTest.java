@@ -143,7 +143,7 @@ class UpdateBuilderTest {
     @DisplayName("Update with null value")
     void testUpdateWithNullValue() {
         QueryResult result = Suprim.update(TestUser_.TABLE)
-            .set(TestUser_.NAME, null)
+            .set(TestUser_.NAME, (String) null)
             .where(TestUser_.ID.eq(1L))
             .build();
 

@@ -29,3 +29,6 @@ release.properties
 *.log
 
 .claude
+plans
+CLAUDE.md
+.repomixignore

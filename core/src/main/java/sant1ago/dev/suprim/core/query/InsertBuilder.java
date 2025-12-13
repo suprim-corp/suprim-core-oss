@@ -4,11 +4,15 @@ import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
 import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.core.dialect.UnsupportedDialectFeatureException;
 import sant1ago.dev.suprim.core.type.Column;
-import sant1ago.dev.suprim.core.type.Literal;
+import sant1ago.dev.suprim.core.type.Expression;
 import sant1ago.dev.suprim.core.type.Table;
+import sant1ago.dev.suprim.core.util.IdMetadata;
 
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static java.util.Objects.isNull;
+import static java.util.Objects.nonNull;
 
 /**
  * Fluent builder for INSERT queries.
@@ -20,14 +24,16 @@ import java.util.stream.Collectors;
  *     .returning(User_.ID)
  *     .build();
  * }</pre>
+ *
+ * @param <T> entity type
  */
-public final class InsertBuilder {
+public final class InsertBuilder<T> {
 
-    private final Table<?> table;
+    private final Table<T> table;
     private final List<ColumnValue<?>> columnValues = new ArrayList<>();
     private final List<Column<?, ?>> returningColumns = new ArrayList<>();
 
-    InsertBuilder(Table<?> table) {
+    InsertBuilder(Table<T> table) {
         this.table = Objects.requireNonNull(table, "table cannot be null");
     }
 
@@ -39,8 +45,28 @@ public final class InsertBuilder {
      * @param value the value to insert
      * @return this builder for chaining
      */
-    public <V> InsertBuilder column(Column<?, V> column, V value) {
-        columnValues.add(new ColumnValue<>(column, value));
+    public <V> InsertBuilder<T> column(Column<?, V> column, V value) {
+        columnValues.add(new ColumnValue<>(column, value, null));
+        return this;
+    }
+
+    /**
+     * Set column value using an expression (e.g., Fn.now()).
+     *
+     * <pre>{@code
+     * Suprim.insertInto(User_.TABLE)
+     *     .column(User_.EMAIL, "test@example.com")
+     *     .column(User_.CREATED_AT, Fn.now())
+     *     .build();
+     * }</pre>
+     *
+     * @param <V> the value type
+     * @param column the column to set
+     * @param expression the expression to use as value
+     * @return this builder for chaining
+     */
+    public <V> InsertBuilder<T> column(Column<?, V> column, Expression<V> expression) {
+        columnValues.add(new ColumnValue<>(column, null, expression));
         return this;
     }
 
@@ -50,7 +76,7 @@ public final class InsertBuilder {
      * @param columns the columns to return
      * @return this builder for chaining
      */
-    public InsertBuilder returning(Column<?, ?>... columns) {
+    public InsertBuilder<T> returning(Column<?, ?>... columns) {
         returningColumns.addAll(Arrays.asList(columns));
         return this;
     }
@@ -71,7 +97,9 @@ public final class InsertBuilder {
      * @return the query result
      */
     public QueryResult build(SqlDialect dialect) {
-        if (columnValues.isEmpty()) {
+        List<ColumnValue<?>> finalColumns = maybeAddGeneratedId();
+
+        if (finalColumns.isEmpty()) {
             throw new IllegalStateException("INSERT requires at least one column");
         }
 
@@ -79,28 +107,28 @@ public final class InsertBuilder {
         Map<String, Object> parameters = new LinkedHashMap<>();
         int paramCounter = 0;
 
-        // INSERT INTO table
         sql.append("INSERT INTO ").append(table.toSql(dialect));
 
-        // (columns)
         sql.append(" (");
-        sql.append(columnValues.stream()
+        sql.append(finalColumns.stream()
                 .map(cv -> dialect.quoteIdentifier(cv.column().getName()))
                 .collect(Collectors.joining(", ")));
         sql.append(")");
 
-        // VALUES (...)
         sql.append(" VALUES (");
         List<String> valuePlaceholders = new ArrayList<>();
-        for (ColumnValue<?> cv : columnValues) {
-            String paramName = "p" + (++paramCounter);
-            valuePlaceholders.add(":" + paramName);
-            parameters.put(paramName, cv.value());
+        for (ColumnValue<?> cv : finalColumns) {
+            if (nonNull(cv.expression())) {
+                valuePlaceholders.add(cv.expression().toSql(dialect));
+            } else {
+                String paramName = "p" + (++paramCounter);
+                valuePlaceholders.add(":" + paramName);
+                parameters.put(paramName, cv.value());
+            }
         }
         sql.append(String.join(", ", valuePlaceholders));
         sql.append(")");
 
-        // RETURNING (PostgreSQL only)
         if (!returningColumns.isEmpty()) {
             if (!dialect.capabilities().supportsReturning()) {
                 throw new UnsupportedDialectFeatureException("RETURNING", dialect.getName(),
@@ -115,6 +143,24 @@ public final class InsertBuilder {
         return new QueryResult(sql.toString(), parameters);
     }
 
-    private record ColumnValue<V>(Column<?, V> column, V value) {
+    private List<ColumnValue<?>> maybeAddGeneratedId() {
+        IdMetadata.Info idInfo = IdMetadata.get(table.getEntityType());
+
+        if (isNull(idInfo) || hasIdColumn(idInfo.columnName()) || !idInfo.isApplicationGenerated()) {
+            return columnValues;
+        }
+
+        Object generatedId = IdMetadata.generateId(idInfo);
+        List<ColumnValue<?>> result = new ArrayList<>();
+        result.add(new ColumnValue<>(new Column<>(table, idInfo.columnName(), Object.class, null), generatedId, null));
+        result.addAll(columnValues);
+        return result;
+    }
+
+    private boolean hasIdColumn(String columnName) {
+        return columnValues.stream().anyMatch(cv -> cv.column().getName().equals(columnName));
+    }
+
+    private record ColumnValue<V>(Column<?, V> column, V value, Expression<V> expression) {
     }
 }

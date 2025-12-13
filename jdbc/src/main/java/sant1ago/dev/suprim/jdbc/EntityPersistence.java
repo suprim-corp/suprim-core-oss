@@ -1,0 +1,379 @@
+package sant1ago.dev.suprim.jdbc;
+
+import sant1ago.dev.suprim.annotation.entity.Column;
+import sant1ago.dev.suprim.annotation.type.GenerationType;
+import sant1ago.dev.suprim.annotation.type.IdGenerator;
+import sant1ago.dev.suprim.core.util.UUIDUtils;
+import sant1ago.dev.suprim.core.dialect.MySqlDialect;
+import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
+import sant1ago.dev.suprim.core.dialect.SqlDialect;
+import sant1ago.dev.suprim.jdbc.exception.PersistenceException;
+
+import java.lang.reflect.Field;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Handles entity persistence with automatic ID generation based on @Id strategy.
+ *
+ * <pre>{@code
+ * // In transaction context:
+ * executor.transaction(tx -> {
+ *     User user = new User();
+ *     user.setEmail("test@example.com");
+ *
+ *     User saved = tx.save(user);  // ID generated automatically
+ *     System.out.println(saved.getId());  // Works!
+ * });
+ *
+ * // Supports all ID strategies:
+ * @Id(strategy = GenerationType.UUID_V7)   // App generates before insert
+ * @Id(strategy = GenerationType.IDENTITY)  // DB generates (SERIAL/AUTO_INCREMENT)
+ * @Id(strategy = GenerationType.UUID_DB)   // DB generates (gen_random_uuid())
+ * @Id(generator = CustomGenerator.class)   // Custom logic
+ * }</pre>
+ */
+final class EntityPersistence {
+
+    private static final Map<Class<? extends IdGenerator<?>>, IdGenerator<?>> GENERATOR_CACHE = new ConcurrentHashMap<>();
+
+    private EntityPersistence() {
+        // Utility class
+    }
+
+    /**
+     * Save an entity with automatic ID generation.
+     *
+     * @param entity the entity to save
+     * @param connection the database connection
+     * @param dialect the SQL dialect
+     * @param <T> entity type
+     * @return the saved entity with ID set
+     */
+    static <T> T save(T entity, Connection connection, SqlDialect dialect) {
+        Objects.requireNonNull(entity, "Entity cannot be null");
+        Objects.requireNonNull(connection, "Connection cannot be null");
+
+        Class<?> entityClass = entity.getClass();
+        EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(entityClass);
+        EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(entityClass);
+
+        // Check if ID already set
+        Object existingId = EntityReflector.getIdOrNull(entity);
+
+        if (Objects.nonNull(existingId)) {
+            // ID already set - just insert
+            return executeInsert(entity, entityMeta, idMeta, connection, dialect, false);
+        }
+
+        // Generate ID based on strategy
+        if (idMeta.isManual()) {
+            throw new PersistenceException(
+                "Entity ID is null and strategy is NONE. " +
+                "Either set the ID manually or configure a generation strategy: " +
+                "@Id(strategy = GenerationType.UUID_V7)",
+                entityClass
+            );
+        }
+
+        if (idMeta.isApplicationGenerated()) {
+            // Generate ID in application
+            Object generatedId = generateId(idMeta);
+            EntityReflector.setId(entity, generatedId);
+            return executeInsert(entity, entityMeta, idMeta, connection, dialect, false);
+        }
+
+        if (idMeta.isDatabaseGenerated()) {
+            // Let database generate ID
+            return executeInsert(entity, entityMeta, idMeta, connection, dialect, true);
+        }
+
+        throw new PersistenceException(
+            "Unsupported ID generation strategy: " + idMeta.strategy(),
+            entityClass
+        );
+    }
+
+    /**
+     * Generate an ID value based on the strategy.
+     */
+    private static Object generateId(EntityReflector.IdMeta idMeta) {
+        // Custom generator takes precedence
+        if (idMeta.hasCustomGenerator()) {
+            IdGenerator<?> generator = getOrCreateGenerator(idMeta.generatorClass());
+            return generator.generate();
+        }
+
+        // Built-in strategies - use UUIDUtils directly
+        UUID uuid = switch (idMeta.strategy()) {
+            case UUID_V4 -> UUIDUtils.v4();
+            case UUID_V7 -> UUIDUtils.v7();
+            default -> throw new IllegalStateException(
+                "Cannot generate ID for strategy: " + idMeta.strategy()
+            );
+        };
+
+        // Return UUID or String based on field type
+        return idMeta.fieldType() == String.class ? uuid.toString() : uuid;
+    }
+
+    /**
+     * Get or create a cached generator instance.
+     */
+    private static IdGenerator<?> getOrCreateGenerator(Class<? extends IdGenerator<?>> generatorClass) {
+        return GENERATOR_CACHE.computeIfAbsent(generatorClass, clazz -> {
+            try {
+                return clazz.getDeclaredConstructor().newInstance();
+            } catch (Exception e) {
+                throw new IllegalStateException(
+                    "Cannot instantiate ID generator: " + clazz.getName() +
+                    ". Ensure it has a no-arg constructor.", e
+                );
+            }
+        });
+    }
+
+    /**
+     * Execute INSERT and optionally retrieve generated ID.
+     */
+    private static <T> T executeInsert(
+        T entity,
+        EntityReflector.EntityMeta entityMeta,
+        EntityReflector.IdMeta idMeta,
+        Connection connection,
+        SqlDialect dialect,
+        boolean retrieveGeneratedId
+    ) {
+        // Build column map from entity
+        Map<String, Object> columns = buildColumnMap(entity, idMeta, retrieveGeneratedId);
+
+        if (columns.isEmpty()) {
+            throw new PersistenceException(
+                "No columns to insert. Entity has no @Column annotated fields with values.",
+                entity.getClass()
+            );
+        }
+
+        // Build SQL
+        String sql = buildInsertSql(entityMeta, idMeta, columns, dialect, retrieveGeneratedId);
+
+        try {
+            if (retrieveGeneratedId) {
+                return executeWithGeneratedKeys(entity, idMeta, columns, sql, connection, dialect);
+            } else {
+                executeSimpleInsert(columns, sql, connection);
+                return entity;
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException(
+                "Failed to save entity: " + e.getMessage(),
+                entity.getClass(),
+                e
+            );
+        }
+    }
+
+    /**
+     * Build column name to value map from entity.
+     */
+    private static Map<String, Object> buildColumnMap(Object entity, EntityReflector.IdMeta idMeta, boolean skipId) {
+        Map<String, Object> columns = new LinkedHashMap<>();
+        Class<?> entityClass = entity.getClass();
+
+        for (Field field : entityClass.getDeclaredFields()) {
+            Column column = field.getAnnotation(Column.class);
+            if (Objects.isNull(column)) {
+                continue;
+            }
+
+            String columnName = column.name().isEmpty()
+                ? ReflectionUtils.toSnakeCase(field.getName())
+                : column.name();
+
+            // Skip ID column if database will generate it
+            if (skipId && columnName.equals(idMeta.columnName())) {
+                continue;
+            }
+
+            Object value = ReflectionUtils.getFieldValue(entity, field.getName());
+            if (Objects.nonNull(value)) {
+                columns.put(columnName, value);
+            }
+        }
+
+        // Add ID if set and not skipping
+        if (!skipId) {
+            Object idValue = EntityReflector.getIdOrNull(entity);
+            if (Objects.nonNull(idValue)) {
+                columns.put(idMeta.columnName(), idValue);
+            }
+        }
+
+        return columns;
+    }
+
+    /**
+     * Build INSERT SQL statement.
+     */
+    private static String buildInsertSql(
+        EntityReflector.EntityMeta entityMeta,
+        EntityReflector.IdMeta idMeta,
+        Map<String, Object> columns,
+        SqlDialect dialect,
+        boolean returningId
+    ) {
+        StringBuilder sql = new StringBuilder();
+
+        // Table name with optional schema
+        String tableName = Objects.nonNull(entityMeta.schema())
+            ? dialect.quoteIdentifier(entityMeta.schema()) + "." + dialect.quoteIdentifier(entityMeta.tableName())
+            : dialect.quoteIdentifier(entityMeta.tableName());
+
+        sql.append("INSERT INTO ").append(tableName).append(" (");
+
+        // Column names
+        StringJoiner columnJoiner = new StringJoiner(", ");
+        for (String col : columns.keySet()) {
+            columnJoiner.add(dialect.quoteIdentifier(col));
+        }
+
+        // Handle UUID_DB - insert the function call
+        if (returningId && idMeta.strategy() == GenerationType.UUID_DB) {
+            columnJoiner.add(dialect.quoteIdentifier(idMeta.columnName()));
+        }
+
+        sql.append(columnJoiner).append(") VALUES (");
+
+        // Placeholders
+        StringJoiner valueJoiner = new StringJoiner(", ");
+        for (int i = 0; i < columns.size(); i++) {
+            valueJoiner.add("?");
+        }
+
+        // Handle UUID_DB
+        if (returningId && idMeta.strategy() == GenerationType.UUID_DB) {
+            String uuidFn = dialect instanceof MySqlDialect ? "UUID()" : "gen_random_uuid()";
+            valueJoiner.add(uuidFn);
+        }
+
+        sql.append(valueJoiner).append(")");
+
+        // RETURNING clause for PostgreSQL
+        if (returningId && dialect.capabilities().supportsReturning()) {
+            sql.append(" RETURNING ").append(dialect.quoteIdentifier(idMeta.columnName()));
+        }
+
+        return sql.toString();
+    }
+
+    /**
+     * Execute INSERT and retrieve generated key.
+     */
+    private static <T> T executeWithGeneratedKeys(
+        T entity,
+        EntityReflector.IdMeta idMeta,
+        Map<String, Object> columns,
+        String sql,
+        Connection connection,
+        SqlDialect dialect
+    ) throws SQLException {
+        boolean supportsReturning = dialect.capabilities().supportsReturning();
+
+        if (supportsReturning) {
+            // PostgreSQL: use RETURNING clause
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                setParameters(ps, columns.values().toArray());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        Object generatedId = rs.getObject(1);
+                        generatedId = convertIdType(generatedId, idMeta.fieldType());
+                        EntityReflector.setId(entity, generatedId);
+                    }
+                }
+            }
+        } else {
+            // MySQL: use RETURN_GENERATED_KEYS
+            try (PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+                setParameters(ps, columns.values().toArray());
+                ps.executeUpdate();
+
+                try (ResultSet rs = ps.getGeneratedKeys()) {
+                    if (rs.next()) {
+                        Object generatedId = rs.getObject(1);
+                        generatedId = convertIdType(generatedId, idMeta.fieldType());
+                        EntityReflector.setId(entity, generatedId);
+                    }
+                }
+            }
+        }
+
+        return entity;
+    }
+
+    /**
+     * Execute simple INSERT without returning.
+     */
+    private static void executeSimpleInsert(
+        Map<String, Object> columns,
+        String sql,
+        Connection connection
+    ) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            setParameters(ps, columns.values().toArray());
+            ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Set parameters on prepared statement.
+     */
+    private static void setParameters(PreparedStatement ps, Object[] values) throws SQLException {
+        int i = 1;
+        for (Object value : values) {
+            ps.setObject(i++, value);
+        }
+    }
+
+    /**
+     * Convert generated ID to expected field type.
+     */
+    private static Object convertIdType(Object value, Class<?> targetType) {
+        if (Objects.isNull(value)) {
+            return null;
+        }
+
+        if (targetType.isInstance(value)) {
+            return value;
+        }
+
+        // Handle common conversions
+        if (targetType == Long.class || targetType == long.class) {
+            if (value instanceof Number n) {
+                return n.longValue();
+            }
+        }
+
+        if (targetType == Integer.class || targetType == int.class) {
+            if (value instanceof Number n) {
+                return n.intValue();
+            }
+        }
+
+        if (targetType == String.class) {
+            return value.toString();
+        }
+
+        if (targetType == java.util.UUID.class) {
+            if (value instanceof String s) {
+                return java.util.UUID.fromString(s);
+            }
+        }
+
+        return value;
+    }
+}

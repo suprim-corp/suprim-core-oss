@@ -5,14 +5,14 @@ package sant1ago.dev.suprim.annotation.type;
  * Implement this to provide your own ID generation logic.
  *
  * <pre>{@code
- * public class UuidV7Generator implements IdGenerator<String> {
+ * public class CustomIdGenerator implements IdGenerator<String> {
  *     @Override
  *     public String generate() {
- *         return UuidCreator.getTimeOrderedEpoch().toString();
+ *         return "prefix-" + UUIDUtils.v7().toString();
  *     }
  * }
  *
- * @Id(generator = UuidV7Generator.class)
+ * @Id(generator = CustomIdGenerator.class)
  * @Column(type = SqlType.UUID)
  * private String id;
  * }</pre>

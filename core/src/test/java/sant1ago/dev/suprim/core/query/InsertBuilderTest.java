@@ -131,8 +131,8 @@ class InsertBuilderTest {
     void testInsertWithNullValues() {
         QueryResult result = Suprim.insertInto(TestUser_.TABLE)
             .column(TestUser_.EMAIL, "test@example.com")
-            .column(TestUser_.NAME, null)
-            .column(TestUser_.AGE, null)
+            .column(TestUser_.NAME, (String) null)
+            .column(TestUser_.AGE, (Integer) null)
             .build();
 
         String sql = result.sql();

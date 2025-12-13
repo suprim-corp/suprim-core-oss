@@ -1,5 +1,7 @@
 package sant1ago.dev.suprim.jdbc;
 
+import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
+import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.core.query.QueryResult;
 import sant1ago.dev.suprim.jdbc.event.*;
 import sant1ago.dev.suprim.jdbc.exception.*;
@@ -311,6 +313,52 @@ public final class Transaction {
      */
     public RelationshipManager relationships() {
         return new RelationshipManager(this);
+    }
+
+    // ==================== ENTITY PERSISTENCE ====================
+
+    /**
+     * Save an entity with automatic ID generation based on @Id strategy.
+     *
+     * <pre>{@code
+     * executor.transaction(tx -> {
+     *     User user = new User();
+     *     user.setEmail("test@example.com");
+     *
+     *     User saved = tx.save(user);  // ID generated automatically
+     *     System.out.println(saved.getId());
+     * });
+     * }</pre>
+     *
+     * <p>Supports all ID generation strategies:
+     * <ul>
+     *   <li>{@code UUID} / {@code UUID_V7} - Application generates before insert</li>
+     *   <li>{@code IDENTITY} - Database generates (SERIAL/AUTO_INCREMENT)</li>
+     *   <li>{@code UUID_DB} - Database generates (gen_random_uuid())</li>
+     *   <li>{@code SEQUENCE} - Database sequence</li>
+     *   <li>Custom generator - Your own IdGenerator implementation</li>
+     * </ul>
+     *
+     * @param entity the entity to save
+     * @param <T> entity type
+     * @return the saved entity with ID set
+     * @throws PersistenceException if save fails or ID cannot be generated
+     */
+    public <T> T save(T entity) {
+        return save(entity, PostgreSqlDialect.INSTANCE);
+    }
+
+    /**
+     * Save an entity with automatic ID generation using specified dialect.
+     *
+     * @param entity the entity to save
+     * @param dialect the SQL dialect to use
+     * @param <T> entity type
+     * @return the saved entity with ID set
+     * @throws PersistenceException if save fails or ID cannot be generated
+     */
+    public <T> T save(T entity, SqlDialect dialect) {
+        return EntityPersistence.save(entity, connection, dialect);
     }
 
     private void setParameters(PreparedStatement ps, Object[] parameters) throws SQLException {

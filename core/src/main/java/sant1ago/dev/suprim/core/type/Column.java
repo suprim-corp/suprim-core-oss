@@ -33,6 +33,17 @@ public non-sealed class Column<T, V> implements Expression<V> {
         this.sqlType = sqlType; // sqlType can be null for computed columns
     }
 
+    /**
+     * Create a dynamic column reference (for internal use).
+     *
+     * @param name column name
+     * @param table table reference
+     * @return column reference
+     */
+    public static <T> Column<T, Object> of(String name, Table<T> table) {
+        return new Column<>(table, name, Object.class, null);
+    }
+
     // ==================== EQUALITY OPERATORS ====================
 
     /**
