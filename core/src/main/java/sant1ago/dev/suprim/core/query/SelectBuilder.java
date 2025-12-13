@@ -124,13 +124,13 @@ public final class SelectBuilder {
 
     /**
      * Add COUNT(column) with optional filter to SELECT clause.
+     * Uses PostgreSQL FILTER syntax - throws UnsupportedDialectFeatureException for other dialects.
      * <pre>{@code
      * .selectCountFilter(User_.ID, User_.IS_ACTIVE.eq(true), "active_count")
      * }</pre>
      */
     public SelectBuilder selectCountFilter(Column<?, ?> column, Predicate filter, String alias) {
-        String filterSql = nonNull(filter) ? " FILTER (WHERE " + filter.toSql(PostgreSqlDialect.INSTANCE) + ")" : "";
-        this.selectItems.add(SelectItem.raw("COUNT(" + column.toSql(PostgreSqlDialect.INSTANCE) + ")" + filterSql + " AS " + alias));
+        this.selectItems.add(SelectItem.countFilter(column, filter, alias));
         return this;
     }
 
@@ -468,9 +468,9 @@ public final class SelectBuilder {
      */
     public SelectBuilder withCount(Relation<?, ?>... relations) {
         for (Relation<?, ?> relation : relations) {
-            String countSql = buildExistsSubquery(relation, null, true);
             String alias = relation.getCountAlias(getRelationFieldName(relation));
-            this.selectItems.add(SelectItem.raw("(" + countSql + ") AS " + alias));
+            String ownerTable = getOwnerTableName(relation);
+            this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.COUNT, relation, null, null, alias, ownerTable));
         }
         return this;
     }
@@ -482,8 +482,8 @@ public final class SelectBuilder {
      * }</pre>
      */
     public SelectBuilder withCount(Relation<?, ?> relation, java.util.function.Function<SelectBuilder, SelectBuilder> constraint, String alias) {
-        String countSql = buildExistsSubquery(relation, constraint, true);
-        this.selectItems.add(SelectItem.raw("(" + countSql + ") AS " + alias));
+        String ownerTable = getOwnerTableName(relation);
+        this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.COUNT, relation, null, constraint, alias, ownerTable));
         return this;
     }
 
@@ -499,8 +499,8 @@ public final class SelectBuilder {
      * @param alias    the alias for the result
      */
     public SelectBuilder withSum(Relation<?, ?> relation, Column<?, ?> column, String alias) {
-        String aggregateSql = buildAggregateSubquery(relation, "SUM", column, null);
-        this.selectItems.add(SelectItem.raw("(" + aggregateSql + ") AS " + alias));
+        String ownerTable = getOwnerTableName(relation);
+        this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.SUM, relation, column, null, alias, ownerTable));
         return this;
     }
 
@@ -508,8 +508,8 @@ public final class SelectBuilder {
      * Add a SUM subquery with constraint.
      */
     public SelectBuilder withSum(Relation<?, ?> relation, Column<?, ?> column, String alias, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
-        String aggregateSql = buildAggregateSubquery(relation, "SUM", column, constraint);
-        this.selectItems.add(SelectItem.raw("(" + aggregateSql + ") AS " + alias));
+        String ownerTable = getOwnerTableName(relation);
+        this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.SUM, relation, column, constraint, alias, ownerTable));
         return this;
     }
 
@@ -521,8 +521,8 @@ public final class SelectBuilder {
      * }</pre>
      */
     public SelectBuilder withAvg(Relation<?, ?> relation, Column<?, ?> column, String alias) {
-        String aggregateSql = buildAggregateSubquery(relation, "AVG", column, null);
-        this.selectItems.add(SelectItem.raw("(" + aggregateSql + ") AS " + alias));
+        String ownerTable = getOwnerTableName(relation);
+        this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.AVG, relation, column, null, alias, ownerTable));
         return this;
     }
 
@@ -530,8 +530,8 @@ public final class SelectBuilder {
      * Add an AVG subquery with constraint.
      */
     public SelectBuilder withAvg(Relation<?, ?> relation, Column<?, ?> column, String alias, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
-        String aggregateSql = buildAggregateSubquery(relation, "AVG", column, constraint);
-        this.selectItems.add(SelectItem.raw("(" + aggregateSql + ") AS " + alias));
+        String ownerTable = getOwnerTableName(relation);
+        this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.AVG, relation, column, constraint, alias, ownerTable));
         return this;
     }
 
@@ -543,8 +543,8 @@ public final class SelectBuilder {
      * }</pre>
      */
     public SelectBuilder withMin(Relation<?, ?> relation, Column<?, ?> column, String alias) {
-        String aggregateSql = buildAggregateSubquery(relation, "MIN", column, null);
-        this.selectItems.add(SelectItem.raw("(" + aggregateSql + ") AS " + alias));
+        String ownerTable = getOwnerTableName(relation);
+        this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.MIN, relation, column, null, alias, ownerTable));
         return this;
     }
 
@@ -552,8 +552,8 @@ public final class SelectBuilder {
      * Add a MIN subquery with constraint.
      */
     public SelectBuilder withMin(Relation<?, ?> relation, Column<?, ?> column, String alias, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
-        String aggregateSql = buildAggregateSubquery(relation, "MIN", column, constraint);
-        this.selectItems.add(SelectItem.raw("(" + aggregateSql + ") AS " + alias));
+        String ownerTable = getOwnerTableName(relation);
+        this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.MIN, relation, column, constraint, alias, ownerTable));
         return this;
     }
 
@@ -565,8 +565,8 @@ public final class SelectBuilder {
      * }</pre>
      */
     public SelectBuilder withMax(Relation<?, ?> relation, Column<?, ?> column, String alias) {
-        String aggregateSql = buildAggregateSubquery(relation, "MAX", column, null);
-        this.selectItems.add(SelectItem.raw("(" + aggregateSql + ") AS " + alias));
+        String ownerTable = getOwnerTableName(relation);
+        this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.MAX, relation, column, null, alias, ownerTable));
         return this;
     }
 
@@ -574,8 +574,8 @@ public final class SelectBuilder {
      * Add a MAX subquery with constraint.
      */
     public SelectBuilder withMax(Relation<?, ?> relation, Column<?, ?> column, String alias, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
-        String aggregateSql = buildAggregateSubquery(relation, "MAX", column, constraint);
-        this.selectItems.add(SelectItem.raw("(" + aggregateSql + ") AS " + alias));
+        String ownerTable = getOwnerTableName(relation);
+        this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.MAX, relation, column, constraint, alias, ownerTable));
         return this;
     }
 
@@ -587,8 +587,8 @@ public final class SelectBuilder {
      * }</pre>
      */
     public SelectBuilder withExists(Relation<?, ?> relation, String alias) {
-        String existsSql = buildExistsSubquery(relation, null, false);
-        this.selectItems.add(SelectItem.raw("EXISTS(" + existsSql + ") AS " + alias));
+        String ownerTable = getOwnerTableName(relation);
+        this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.EXISTS, relation, null, null, alias, ownerTable));
         return this;
     }
 
@@ -596,47 +596,15 @@ public final class SelectBuilder {
      * Add an EXISTS subquery with constraint.
      */
     public SelectBuilder withExists(Relation<?, ?> relation, String alias, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
-        String existsSql = buildExistsSubquery(relation, constraint, false);
-        this.selectItems.add(SelectItem.raw("EXISTS(" + existsSql + ") AS " + alias));
+        String ownerTable = getOwnerTableName(relation);
+        this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.EXISTS, relation, null, constraint, alias, ownerTable));
         return this;
     }
 
     /**
-     * Build aggregate subquery for a relationship.
-     */
-    private String buildAggregateSubquery(Relation<?, ?> relation, String function, Column<?, ?> column, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
-        StringBuilder sql = new StringBuilder();
-        sql.append("SELECT ");
-        sql.append(function).append("(").append(column.getName()).append(")");
-        sql.append(" FROM ");
-        sql.append(relation.getExistsFromTable());
-
-        // For BelongsToMany, add pivot table join
-        String pivotJoin = relation.getPivotJoinForExists();
-        if (nonNull(pivotJoin)) {
-            sql.append(" ").append(pivotJoin);
-        }
-
-        // Get the owner table name for the correlation
-        String ownerTable = nonNull(fromTable) ? fromTable.getName() : relation.getOwnerTable().getName();
-        sql.append(" WHERE ");
-        sql.append(relation.getExistsCondition(ownerTable));
-
-        // Apply additional constraints if provided
-        if (nonNull(constraint)) {
-            SelectBuilder subBuilder = new SelectBuilder(List.of());
-            subBuilder = constraint.apply(subBuilder);
-            if (nonNull(subBuilder.whereClause)) {
-                sql.append(" AND ");
-                sql.append(subBuilder.whereClause.toSql(PostgreSqlDialect.INSTANCE));
-            }
-        }
-
-        return sql.toString();
-    }
-
-    /**
-     * Build EXISTS or COUNT subquery for a relationship.
+     * Build EXISTS or COUNT subquery for a relationship (used in WHERE clause predicates).
+     * Note: Constraint SQL uses PostgreSQL dialect by default - for cross-dialect support,
+     * use deferred predicate generation at build() time.
      */
     private String buildExistsSubquery(Relation<?, ?> relation, java.util.function.Function<SelectBuilder, SelectBuilder> constraint, boolean isCount) {
         StringBuilder sql = new StringBuilder();
@@ -652,11 +620,12 @@ public final class SelectBuilder {
         }
 
         // Get the owner table name for the correlation
-        String ownerTable = nonNull(fromTable) ? fromTable.getName() : relation.getOwnerTable().getName();
+        String ownerTable = getOwnerTableName(relation);
         sql.append(" WHERE ");
         sql.append(relation.getExistsCondition(ownerTable));
 
         // Apply additional constraints if provided
+        // TODO: For full dialect support, defer constraint SQL to build() time
         if (nonNull(constraint)) {
             SelectBuilder subBuilder = new SelectBuilder(List.of());
             subBuilder = constraint.apply(subBuilder);
@@ -675,6 +644,13 @@ public final class SelectBuilder {
     private String getRelationFieldName(Relation<?, ?> relation) {
         // Use related table name as fallback
         return relation.getRelatedTable().getName();
+    }
+
+    /**
+     * Get the owner table name for correlation in subqueries.
+     */
+    private String getOwnerTableName(Relation<?, ?> relation) {
+        return nonNull(fromTable) ? fromTable.getName() : relation.getOwnerTable().getName();
     }
 
     // ==================== PIVOT OPERATIONS ====================
@@ -1392,6 +1368,14 @@ public final class SelectBuilder {
                 }
             }
         }
+    }
+
+    /**
+     * Get the current WHERE clause predicate.
+     * Package-private for use by SelectItem.SubqueryItem.
+     */
+    Predicate getWhereClause() {
+        return whereClause;
     }
 
     /**
