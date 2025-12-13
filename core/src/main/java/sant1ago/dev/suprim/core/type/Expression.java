@@ -8,7 +8,7 @@ import sant1ago.dev.suprim.core.dialect.SqlDialect;
  *
  * @param <V> the Java type of the expression's value
  */
-public sealed interface Expression<V> permits Column, Literal, ListLiteral, JsonbColumn.JsonPathExpression, JsonbColumn.JsonLiteral, AliasedColumn, ArrayColumn.ArrayLiteral, SubqueryExpression, Aggregate, Coalesce {
+public sealed interface Expression<V> permits Column, Literal, ListLiteral, JsonbColumn.JsonPathExpression, JsonbColumn.JsonLiteral, AliasedColumn, ArrayColumn.ArrayLiteral, SubqueryExpression, Aggregate, Coalesce, SqlFunction {
 
     /**
      * Get the Java type of this expression's value.

@@ -3,6 +3,7 @@ package sant1ago.dev.suprim.core.query;
 import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
 import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.core.type.Column;
+import sant1ago.dev.suprim.core.type.Expression;
 import sant1ago.dev.suprim.core.type.Predicate;
 import sant1ago.dev.suprim.core.type.Table;
 
@@ -38,7 +39,22 @@ public final class UpdateBuilder {
      * Set column to value.
      */
     public <V> UpdateBuilder set(Column<?, V> column, V value) {
-        setValues.add(new ColumnValue<>(column, value));
+        setValues.add(new ColumnValue<>(column, value, null));
+        return this;
+    }
+
+    /**
+     * Set column to expression value (e.g., Fn.now()).
+     *
+     * <pre>{@code
+     * Suprim.update(User_.TABLE)
+     *     .set(User_.UPDATED_AT, Fn.now())
+     *     .where(User_.ID.eq(1L))
+     *     .build();
+     * }</pre>
+     */
+    public <V> UpdateBuilder set(Column<?, V> column, Expression<V> expression) {
+        setValues.add(new ColumnValue<>(column, null, expression));
         return this;
     }
 
@@ -96,9 +112,16 @@ public final class UpdateBuilder {
         sql.append(" SET ");
         List<String> setClauses = new ArrayList<>();
         for (ColumnValue<?> cv : setValues) {
-            String paramName = "p" + (++paramCounter);
-            setClauses.add(dialect.quoteIdentifier(cv.column().getName()) + " = :" + paramName);
-            parameters.put(paramName, cv.value());
+            String colName = dialect.quoteIdentifier(cv.column().getName());
+            if (nonNull(cv.expression())) {
+                // Use expression SQL directly (e.g., NOW())
+                setClauses.add(colName + " = " + cv.expression().toSql(dialect));
+            } else {
+                // Use parameter placeholder
+                String paramName = "p" + (++paramCounter);
+                setClauses.add(colName + " = :" + paramName);
+                parameters.put(paramName, cv.value());
+            }
         }
         sql.append(String.join(", ", setClauses));
 
@@ -118,6 +141,6 @@ public final class UpdateBuilder {
         return new QueryResult(sql.toString(), parameters);
     }
 
-    private record ColumnValue<V>(Column<?, V> column, V value) {
+    private record ColumnValue<V>(Column<?, V> column, V value, Expression<V> expression) {
     }
 }

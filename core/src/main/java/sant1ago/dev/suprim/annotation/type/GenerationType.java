@@ -33,7 +33,7 @@ public enum GenerationType {
      * Standard UUID (v4 - random).
      * Application generates UUID before insert.
      */
-    UUID,
+    UUID_V4,
 
     /**
      * Time-ordered UUID (v7).
@@ -63,7 +63,7 @@ public enum GenerationType {
      * @return true if UUID-based strategy
      */
     public boolean isUuid() {
-        return this == UUID || this == UUID_V7 || this == UUID_DB;
+        return this == UUID_V4 || this == UUID_V7 || this == UUID_DB;
     }
 
     /**
@@ -72,7 +72,7 @@ public enum GenerationType {
      * @return true if application generates the ID
      */
     public boolean isApplicationGenerated() {
-        return this == UUID || this == UUID_V7;
+        return this == UUID_V4 || this == UUID_V7;
     }
 
     /**

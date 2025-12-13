@@ -92,7 +92,7 @@ public final class RelationshipManager {
         // Build UPDATE query to clear FK
         Table<T> ownerTable = relation.getOwnerTable();
         QueryResult update = Suprim.update(ownerTable)
-                .set(createColumn(ownerTable, relation.getForeignKey(), Object.class), null)
+                .set(createColumn(ownerTable, relation.getForeignKey(), Object.class), (Object) null)
                 .where(createColumn(ownerTable, "id", Object.class).eq(entityId))
                 .build();
 

@@ -290,8 +290,8 @@ public final class Suprim {
     /**
      * Start INSERT INTO query.
      */
-    public static InsertBuilder insertInto(Table<?> table) {
-        return new InsertBuilder(table);
+    public static <T> InsertBuilder<T> insertInto(Table<T> table) {
+        return new InsertBuilder<>(table);
     }
 
     // ==================== UPDATE ====================
