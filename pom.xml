@@ -6,7 +6,7 @@
 
     <groupId>dev.suprim</groupId>
     <artifactId>suprim-parent</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.0.2</version>
     <packaging>pom</packaging>
 
     <name>Suprim OSS</name>
