@@ -1,5 +1,7 @@
 package sant1ago.dev.suprim.jdbc;
 
+import sant1ago.dev.suprim.core.dialect.DialectRegistry;
+import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.core.query.EagerLoadSpec;
 import sant1ago.dev.suprim.core.query.QueryResult;
 import sant1ago.dev.suprim.core.type.Relation;
@@ -19,7 +21,6 @@ import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 /**
  * Lightweight query executor for Suprim queries.
@@ -62,15 +63,57 @@ public final class SuprimExecutor {
     private final DataSource dataSource;
     private final EventDispatcher dispatcher;
     private final String connectionName;
+    private volatile SqlDialect dialect;
+
+    // Lazy-initialized internal helpers
+    private volatile PaginationHelper paginationHelper;
+    private volatile ChunkProcessor chunkProcessor;
 
     private SuprimExecutor(DataSource dataSource) {
-        this(dataSource, new EventDispatcher(), "default");
+        this(dataSource, new EventDispatcher(), "default", null);
     }
 
-    private SuprimExecutor(DataSource dataSource, EventDispatcher dispatcher, String connectionName) {
+    private SuprimExecutor(DataSource dataSource, EventDispatcher dispatcher, String connectionName, SqlDialect dialect) {
         this.dataSource = Objects.requireNonNull(dataSource, "dataSource must not be null");
         this.dispatcher = dispatcher;
         this.connectionName = connectionName;
+        this.dialect = dialect;
+    }
+
+    /**
+     * Get the SQL dialect, auto-detecting from connection if not explicitly set.
+     *
+     * @param connection the connection for auto-detection (if needed)
+     * @return the SQL dialect
+     */
+    private SqlDialect getDialect(Connection connection) {
+        if (Objects.nonNull(dialect)) {
+            return dialect;
+        }
+        // Auto-detect and cache
+        dialect = DialectRegistry.detect(connection);
+        return dialect;
+    }
+
+    /**
+     * Safely quote an identifier, only if it requires quoting.
+     * Simple alphanumeric/underscore identifiers are left unquoted to preserve
+     * database case-folding behavior (important for H2 which uppercases unquoted identifiers).
+     *
+     * @param identifier the identifier to potentially quote
+     * @param dialect    the SQL dialect for quoting
+     * @return the identifier, quoted only if necessary
+     */
+    private static String safeQuoteIdentifier(String identifier, SqlDialect dialect) {
+        if (Objects.isNull(identifier) || identifier.isEmpty()) {
+            return identifier;
+        }
+        // Only quote if identifier contains special characters, spaces, or starts with digit
+        // Simple alphanumeric with underscores are safe unquoted and preserve case-folding
+        if (identifier.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+            return identifier; // Safe, no quoting needed
+        }
+        return dialect.quoteIdentifier(identifier);
     }
 
     /**
@@ -108,9 +151,22 @@ public final class SuprimExecutor {
         private final DataSource dataSource;
         private final EventDispatcher dispatcher = new EventDispatcher();
         private String connectionName = "default";
+        private SqlDialect dialect;
 
         private Builder(DataSource dataSource) {
             this.dataSource = Objects.requireNonNull(dataSource, "dataSource must not be null");
+        }
+
+        /**
+         * Set the SQL dialect explicitly.
+         * If not set, the dialect is auto-detected from the first connection.
+         *
+         * @param dialect the SQL dialect to use
+         * @return this builder
+         */
+        public Builder dialect(SqlDialect dialect) {
+            this.dialect = dialect;
+            return this;
         }
 
         /**
@@ -186,7 +242,7 @@ public final class SuprimExecutor {
          * @return new SuprimExecutor with configured listeners
          */
         public SuprimExecutor build() {
-            return new SuprimExecutor(dataSource, dispatcher, connectionName);
+            return new SuprimExecutor(dataSource, dispatcher, connectionName, dialect);
         }
     }
 
@@ -205,7 +261,7 @@ public final class SuprimExecutor {
      * Remove a query listener.
      *
      * @param listener the listener to remove
-     * @return true if listener was found and removed
+     * @return true if the listener was found and removed
      */
     public boolean removeQueryListener(QueryListener listener) {
         return dispatcher.removeQueryListener(listener);
@@ -224,7 +280,7 @@ public final class SuprimExecutor {
      * Remove a transaction listener.
      *
      * @param listener the listener to remove
-     * @return true if listener was found and removed
+     * @return true if the listener was found and removed
      */
     public boolean removeTransactionListener(TransactionListener listener) {
         return dispatcher.removeTransactionListener(listener);
@@ -253,7 +309,7 @@ public final class SuprimExecutor {
     public <T> List<T> query(QueryResult queryResult, RowMapper<T> mapper) {
         SqlParameterConverter.Result converted = SqlParameterConverter.convert(queryResult);
 
-        // Create and fire before event
+        // Create and fire before the event
         QueryEvent beforeEvent = QueryEvent.before(converted.sql(), converted.parameters(), connectionName);
         dispatcher.fireBeforeQuery(beforeEvent);
 
@@ -639,6 +695,37 @@ public final class SuprimExecutor {
         }
     }
 
+    // ============ Internal Helpers ============
+
+    /**
+     * Package-private connection accessor for internal helpers.
+     */
+    Connection getConnectionInternal() throws SQLException {
+        return getConnection();
+    }
+
+    private PaginationHelper getPaginationHelper() {
+        if (Objects.isNull(paginationHelper)) {
+            synchronized (this) {
+                if (Objects.isNull(paginationHelper)) {
+                    paginationHelper = new PaginationHelper(this);
+                }
+            }
+        }
+        return paginationHelper;
+    }
+
+    private ChunkProcessor getChunkProcessor() {
+        if (Objects.isNull(chunkProcessor)) {
+            synchronized (this) {
+                if (Objects.isNull(chunkProcessor)) {
+                    chunkProcessor = new ChunkProcessor(this);
+                }
+            }
+        }
+        return chunkProcessor;
+    }
+
     /**
      * Functional interface for transactions that return a value.
      *
@@ -730,17 +817,7 @@ public final class SuprimExecutor {
      * Execute a query with pagination metadata using custom mapper.
      */
     public <T> PaginatedResult<T> paginate(SelectBuilder builder, int page, int perPage, RowMapper<T> mapper) {
-        if (page < 1) page = 1;
-        if (perPage < 1) perPage = 10;
-
-        // Count total
-        long total = count(builder);
-
-        // Get page data
-        QueryResult dataQuery = builder.paginate(page, perPage).build();
-        List<T> data = query(dataQuery, mapper);
-
-        return PaginatedResult.of(data, page, perPage, total);
+        return getPaginationHelper().paginate(builder, page, perPage, mapper);
     }
 
     /**
@@ -778,110 +855,14 @@ public final class SuprimExecutor {
      * For bidirectional navigation, use offset pagination or implement seek-based pagination.</p>
      */
     public <T, V> CursorResult<T> cursorPaginate(SelectBuilder builder, String cursor, int perPage, RowMapper<T> mapper, Column<T, V> cursorColumn) {
-        if (perPage < 1) perPage = 10;
-
-        // Decode cursor to get last seen value
-        String decodedCursor = CursorResult.decodeCursor(cursor);
-        V lastValue = null;
-
-        if (Objects.nonNull(decodedCursor) && !decodedCursor.isEmpty()) {
-            lastValue = parseCursorValue(decodedCursor, cursorColumn.getValueType());
-        }
-
-        // Build query with keyset condition (WHERE column > lastValue)
-        SelectBuilder queryBuilder = builder.orderBy(cursorColumn.asc());
-        if (Objects.nonNull(lastValue)) {
-            queryBuilder = queryBuilder.where(cursorColumn.gt(lastValue));
-        }
-        QueryResult dataQuery = queryBuilder.limit(perPage + 1).build();
-
-        List<T> results = query(dataQuery, mapper);
-
-        // Determine if there are more pages
-        boolean hasMore = results.size() > perPage;
-        List<T> data = hasMore ? results.subList(0, perPage) : results;
-
-        // Build next cursor from last item's column value
-        String nextCursor = null;
-        if (hasMore && !data.isEmpty()) {
-            T lastItem = data.get(data.size() - 1);
-            Object lastColValue = EntityReflector.getFieldByColumnName(lastItem, cursorColumn.getName());
-            nextCursor = CursorResult.encodeCursor(lastColValue);
-        }
-
-        // Keyset pagination doesn't support backward navigation efficiently
-        // (would need to reverse sort and use < operator)
-        return CursorResult.of(data, nextCursor, null, perPage);
-    }
-
-    /**
-     * Parse cursor value string to appropriate type with type safety.
-     *
-     * @param value      the string value to parse
-     * @param targetType the target class type
-     * @param <V>        the value type
-     * @return parsed value of type V
-     */
-    private <V> V parseCursorValue(String value, Class<V> targetType) {
-        if (Objects.isNull(value)) return null;
-
-        Object result;
-        try {
-            if (targetType == Long.class || targetType == long.class) {
-                result = Long.parseLong(value);
-            } else if (targetType == Integer.class || targetType == int.class) {
-                result = Integer.parseInt(value);
-            } else if (targetType == Double.class || targetType == double.class) {
-                result = Double.parseDouble(value);
-            } else if (targetType == Float.class || targetType == float.class) {
-                result = Float.parseFloat(value);
-            } else if (targetType == String.class) {
-                result = value;
-            } else if (targetType == java.util.UUID.class) {
-                result = java.util.UUID.fromString(value);
-            } else if (targetType == java.time.LocalDateTime.class) {
-                result = java.time.LocalDateTime.parse(value);
-            } else if (targetType == java.time.LocalDate.class) {
-                result = java.time.LocalDate.parse(value);
-            } else if (targetType == java.time.Instant.class) {
-                result = java.time.Instant.parse(value);
-            } else {
-                // Fallback: try to use as-is (String)
-                result = value;
-            }
-            return targetType.cast(result);
-        } catch (ClassCastException e) {
-            throw new IllegalArgumentException("Cannot cast cursor value '" + value + "' to " + targetType.getSimpleName(), e);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Cannot parse cursor value '" + value + "' as " + targetType.getSimpleName(), e);
-        }
+        return getPaginationHelper().cursorPaginate(builder, cursor, perPage, mapper, cursorColumn);
     }
 
     /**
      * Count total rows for a query (without pagination).
      */
     public long count(SelectBuilder builder) {
-        // Build the original query to get SQL and parameters
-        QueryResult original = builder.build();
-        SqlParameterConverter.Result converted = SqlParameterConverter.convert(original);
-
-        // Wrap the original query in a count query
-        String countSql = "SELECT COUNT(*) FROM (" + converted.sql() + ") AS count_query";
-
-        try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(countSql)) {
-
-            setParameters(ps, converted.parameters());
-
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getLong(1);
-                }
-                return 0;
-            }
-        } catch (SQLException e) {
-            throw ExceptionTranslator.translateQuery(countSql, converted.parameters(), e);
-        }
+        return getPaginationHelper().count(builder);
     }
 
     // ==================== CHUNKING ====================
@@ -917,34 +898,7 @@ public final class SuprimExecutor {
      * Process query results in chunks with custom mapper.
      */
     public <T> long chunk(SelectBuilder builder, int chunkSize, RowMapper<T> mapper, Function<List<T>, Boolean> processor) {
-        if (chunkSize < 1) chunkSize = 1000;
-
-        long totalProcessed = 0;
-        int offset = 0;
-
-        while (true) {
-            QueryResult chunkQuery = builder.limit(chunkSize).offset(offset).build();
-            List<T> chunk = query(chunkQuery, mapper);
-
-            if (chunk.isEmpty()) {
-                break;
-            }
-
-            totalProcessed += chunk.size();
-
-            Boolean shouldContinue = processor.apply(chunk);
-            if (Boolean.FALSE.equals(shouldContinue)) {
-                break;
-            }
-
-            if (chunk.size() < chunkSize) {
-                break; // Last chunk
-            }
-
-            offset += chunkSize;
-        }
-
-        return totalProcessed;
+        return getChunkProcessor().chunk(builder, chunkSize, mapper, processor);
     }
 
     /**
@@ -969,44 +923,7 @@ public final class SuprimExecutor {
      * Uses WHERE id > lastId instead of OFFSET for O(1) performance on large datasets.
      */
     public <T, V> long chunkById(SelectBuilder builder, int chunkSize, RowMapper<T> mapper, Column<T, V> idColumn, Function<List<T>, Boolean> processor) {
-        if (chunkSize < 1) chunkSize = 1000;
-
-        long totalProcessed = 0;
-        V lastId = null;
-        Class<V> idType = idColumn.getValueType();
-
-        while (true) {
-            // Build query with keyset condition (WHERE id > lastId)
-            SelectBuilder queryBuilder = builder.orderBy(idColumn.asc());
-            if (Objects.nonNull(lastId)) {
-                queryBuilder = queryBuilder.where(idColumn.gt(lastId));
-            }
-            QueryResult chunkQuery = queryBuilder.limit(chunkSize).build();
-
-            List<T> chunk = query(chunkQuery, mapper);
-
-            if (chunk.isEmpty()) {
-                break;
-            }
-
-            totalProcessed += chunk.size();
-
-            Boolean shouldContinue = processor.apply(chunk);
-            if (Boolean.FALSE.equals(shouldContinue)) {
-                break;
-            }
-
-            if (chunk.size() < chunkSize) {
-                break; // Last chunk
-            }
-
-            // Get last ID for next iteration (keyset) - type-safe cast via Class.cast()
-            T lastItem = chunk.get(chunk.size() - 1);
-            Object lastIdValue = EntityReflector.getFieldByColumnName(lastItem, idColumn.getName());
-            lastId = idType.cast(lastIdValue);
-        }
-
-        return totalProcessed;
+        return getChunkProcessor().chunkById(builder, chunkSize, mapper, idColumn, processor);
     }
 
     /**
@@ -1031,64 +948,7 @@ public final class SuprimExecutor {
      * Create a lazy stream with custom mapper.
      */
     public <T> Stream<T> lazy(QueryResult queryResult, RowMapper<T> mapper) {
-        SqlParameterConverter.Result converted = SqlParameterConverter.convert(queryResult);
-
-        try {
-            Connection conn = getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                    converted.sql(),
-                    ResultSet.TYPE_FORWARD_ONLY,
-                    ResultSet.CONCUR_READ_ONLY
-            );
-            ps.setFetchSize(100); // Stream in batches
-
-            setParameters(ps, converted.parameters());
-            ResultSet rs = ps.executeQuery();
-
-            Iterator<T> iterator = new Iterator<>() {
-                private boolean hasNext;
-                private boolean nextChecked = false;
-
-                @Override
-                public boolean hasNext() {
-                    if (!nextChecked) {
-                        try {
-                            hasNext = rs.next();
-                        } catch (SQLException e) {
-                            throw new RuntimeException(e);
-                        }
-                        nextChecked = true;
-                    }
-                    return hasNext;
-                }
-
-                @Override
-                public T next() {
-                    if (!hasNext()) {
-                        throw new NoSuchElementException();
-                    }
-                    nextChecked = false;
-                    try {
-                        return mapper.map(rs);
-                    } catch (SQLException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
-            };
-
-            Spliterator<T> spliterator = Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED);
-            return StreamSupport.stream(spliterator, false)
-                    .onClose(() -> {
-                        try {
-                            rs.close();
-                            ps.close();
-                            conn.close();
-                        } catch (SQLException ignored) {
-                        }
-                    });
-        } catch (SQLException e) {
-            throw ExceptionTranslator.translateQuery(converted.sql(), converted.parameters(), e);
-        }
+        return getChunkProcessor().lazy(queryResult, mapper);
     }
 
     // ==================== QUERY RESULT METHODS ====================
@@ -1140,27 +1000,31 @@ public final class SuprimExecutor {
 
         EntityReflector.EntityMeta meta = EntityReflector.getEntityMeta(entityClass);
 
-        // Build qualified table name (unquoted for portability across databases)
-        String tableName = Objects.nonNull(meta.schema()) && !meta.schema().isEmpty()
-                ? meta.schema() + "." + meta.tableName()
-                : meta.tableName();
+        try (Connection conn = getConnection()) {
+            SqlDialect sqlDialect = getDialect(conn);
 
-        // Build parameterized query (unquoted column for portability, FETCH FIRST for SQL standard)
-        String sql = "SELECT * FROM " + tableName + " WHERE " + meta.idColumn() + " = ? FETCH FIRST 1 ROWS ONLY";
+            // Build a qualified table name with safe identifier quoting (quotes only when needed)
+            String tableName = Objects.nonNull(meta.schema()) && !meta.schema().isEmpty()
+                    ? safeQuoteIdentifier(meta.schema(), sqlDialect) + "." + safeQuoteIdentifier(meta.tableName(), sqlDialect)
+                    : safeQuoteIdentifier(meta.tableName(), sqlDialect);
 
-        try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+            // Build a parameterized query with SQL:2008 standard FETCH FIRST (more portable)
+            String sql = "SELECT * FROM " + tableName + " WHERE " + safeQuoteIdentifier(meta.idColumn(), sqlDialect) + " = ? FETCH FIRST 1 ROWS ONLY";
 
-            ps.setObject(1, id);
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setObject(1, id);
 
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) {
+                        return Optional.empty();
+                    }
+                    return Optional.of(EntityMapper.of(entityClass).map(rs));
                 }
-                return Optional.of(EntityMapper.of(entityClass).map(rs));
+            } catch (SQLException e) {
+                throw ExceptionTranslator.translateQuery(sql, new Object[]{id}, e);
             }
         } catch (SQLException e) {
-            throw ExceptionTranslator.translateQuery(sql, new Object[]{id}, e);
+            throw ConnectionException.fromSQLException(e);
         }
     }
 

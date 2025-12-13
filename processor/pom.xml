@@ -7,7 +7,7 @@
     <parent>
         <groupId>dev.suprim</groupId>
         <artifactId>suprim-parent</artifactId>
-        <version>0.0.2</version>
+        <version>0.0.3</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -22,6 +22,12 @@
         <dependency>
             <groupId>dev.suprim</groupId>
             <artifactId>suprim-core</artifactId>
+        </dependency>
+
+        <!-- Casey - String case conversion (via JitPack) -->
+        <dependency>
+            <groupId>com.github.suprim-corp</groupId>
+            <artifactId>casey</artifactId>
         </dependency>
 
         <!-- JavaPoet for code generation -->

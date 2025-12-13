@@ -419,7 +419,6 @@ class EntityMapperTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Inheritance not supported - requires entity metadata")
     void map_inheritanceFromMappedSuperclass_mapsAllFields() {
         UUID uuid = UUID.randomUUID();
         LocalDateTime createdAt = LocalDateTime.now();
@@ -525,6 +524,151 @@ class EntityMapperTest {
         assertEquals(1, results.size());
         assertEquals(1000L, results.get(0).longValue());
         assertEquals(500, results.get(0).intValue());
+    }
+
+    // ============ ENUM CONVERSION TESTS ============
+
+    @Test
+    void map_enumFromString_mapsCorrectly() {
+        insertUser("enum@test.com", "ACTIVE", true, 30, null);
+
+        List<EnumFromStringRecord> results = executor.query(
+                new QueryResult("SELECT full_name as status FROM users", Map.of()),
+                EntityMapper.of(EnumFromStringRecord.class)
+        );
+
+        assertEquals(1, results.size());
+        assertEquals(UserStatus.ACTIVE, results.get(0).status());
+    }
+
+    @Test
+    void map_enumFromString_caseInsensitive() {
+        insertUser("enum@test.com", "active", true, 30, null);
+
+        List<EnumFromStringRecord> results = executor.query(
+                new QueryResult("SELECT full_name as status FROM users", Map.of()),
+                EntityMapper.of(EnumFromStringRecord.class)
+        );
+
+        assertEquals(1, results.size());
+        assertEquals(UserStatus.ACTIVE, results.get(0).status());
+    }
+
+    @Test
+    void map_enumFromOrdinal_mapsCorrectly() {
+        // Insert ordinal 1 which maps to INACTIVE (0=ACTIVE, 1=INACTIVE, 2=SUSPENDED)
+        insertUser("enum@test.com", "Test", true, 1, null);
+
+        List<EnumFromOrdinalRecord> results = executor.query(
+                new QueryResult("SELECT age as status FROM users", Map.of()),
+                EntityMapper.of(EnumFromOrdinalRecord.class)
+        );
+
+        assertEquals(1, results.size());
+        assertEquals(UserStatus.INACTIVE, results.get(0).status());
+    }
+
+    @Test
+    void map_enumInClass_mapsCorrectly() {
+        insertUser("enum@test.com", "SUSPENDED", true, 30, null);
+
+        List<ClassWithEnumField> results = executor.query(
+                new QueryResult("SELECT email, full_name as status FROM users", Map.of()),
+                EntityMapper.of(ClassWithEnumField.class)
+        );
+
+        assertEquals(1, results.size());
+        assertEquals("enum@test.com", results.get(0).email);
+        assertEquals(UserStatus.SUSPENDED, results.get(0).status);
+    }
+
+    // ============ JSON/JSONB CONVERSION TESTS ============
+
+    @Test
+    void map_jsonStringToMap_mapsCorrectly() throws Exception {
+        // Create table with JSON column (H2 stores as VARCHAR)
+        try (Statement stmt = setupConnection.createStatement()) {
+            stmt.execute("CREATE TABLE json_test (id INT PRIMARY KEY, metadata VARCHAR(1000))");
+            stmt.execute("INSERT INTO json_test VALUES (1, '{\"key\":\"value\",\"count\":42}')");
+        }
+
+        List<JsonMapRecord> results = executor.query(
+                new QueryResult("SELECT id, metadata FROM json_test", Map.of()),
+                EntityMapper.of(JsonMapRecord.class)
+        );
+
+        assertEquals(1, results.size());
+        assertNotNull(results.get(0).metadata());
+        assertEquals("value", results.get(0).metadata().get("key"));
+        assertEquals(42, results.get(0).metadata().get("count"));
+
+        // Cleanup
+        try (Statement stmt = setupConnection.createStatement()) {
+            stmt.execute("DROP TABLE json_test");
+        }
+    }
+
+    @Test
+    void map_jsonStringToMapInClass_mapsCorrectly() throws Exception {
+        try (Statement stmt = setupConnection.createStatement()) {
+            stmt.execute("CREATE TABLE json_class_test (id INT PRIMARY KEY, data VARCHAR(1000))");
+            stmt.execute("INSERT INTO json_class_test VALUES (1, '{\"name\":\"test\",\"active\":true}')");
+        }
+
+        List<ClassWithMapField> results = executor.query(
+                new QueryResult("SELECT id, data FROM json_class_test", Map.of()),
+                EntityMapper.of(ClassWithMapField.class)
+        );
+
+        assertEquals(1, results.size());
+        assertNotNull(results.get(0).data);
+        assertEquals("test", results.get(0).data.get("name"));
+        assertEquals(true, results.get(0).data.get("active"));
+
+        try (Statement stmt = setupConnection.createStatement()) {
+            stmt.execute("DROP TABLE json_class_test");
+        }
+    }
+
+    @Test
+    void map_emptyJsonString_returnsEmptyMap() throws Exception {
+        try (Statement stmt = setupConnection.createStatement()) {
+            stmt.execute("CREATE TABLE empty_json_test (id INT PRIMARY KEY, metadata VARCHAR(1000))");
+            stmt.execute("INSERT INTO empty_json_test VALUES (1, '{}')");
+        }
+
+        List<JsonMapRecord> results = executor.query(
+                new QueryResult("SELECT id, metadata FROM empty_json_test", Map.of()),
+                EntityMapper.of(JsonMapRecord.class)
+        );
+
+        assertEquals(1, results.size());
+        assertNotNull(results.get(0).metadata());
+        assertTrue(results.get(0).metadata().isEmpty());
+
+        try (Statement stmt = setupConnection.createStatement()) {
+            stmt.execute("DROP TABLE empty_json_test");
+        }
+    }
+
+    @Test
+    void map_nullJsonColumn_returnsNull() throws Exception {
+        try (Statement stmt = setupConnection.createStatement()) {
+            stmt.execute("CREATE TABLE null_json_test (id INT PRIMARY KEY, metadata VARCHAR(1000))");
+            stmt.execute("INSERT INTO null_json_test VALUES (1, NULL)");
+        }
+
+        List<JsonMapRecord> results = executor.query(
+                new QueryResult("SELECT id, metadata FROM null_json_test", Map.of()),
+                EntityMapper.of(JsonMapRecord.class)
+        );
+
+        assertEquals(1, results.size());
+        assertNull(results.get(0).metadata());
+
+        try (Statement stmt = setupConnection.createStatement()) {
+            stmt.execute("DROP TABLE null_json_test");
+        }
     }
 
     // ============ HELPER METHODS ============
@@ -781,5 +925,34 @@ class EntityMapperTest {
         public String getName() {
             return name;
         }
+    }
+
+    // Enum for testing
+    enum UserStatus {
+        ACTIVE, INACTIVE, SUSPENDED
+    }
+
+    // Enum test records
+    record EnumFromStringRecord(UserStatus status) {}
+
+    record EnumFromOrdinalRecord(UserStatus status) {}
+
+    // Class with enum field
+    static class ClassWithEnumField {
+        String email;
+        UserStatus status;
+
+        ClassWithEnumField() {}
+    }
+
+    // JSON/JSONB test records
+    record JsonMapRecord(int id, Map<String, Object> metadata) {}
+
+    // Class with Map field for JSON
+    static class ClassWithMapField {
+        int id;
+        Map<String, Object> data;
+
+        ClassWithMapField() {}
     }
 }

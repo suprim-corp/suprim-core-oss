@@ -19,14 +19,14 @@ Open-source type-safe SQL query builder for PostgreSQL, MySQL, and MariaDB.
 <dependency>
     <groupId>dev.suprim</groupId>
     <artifactId>suprim-core</artifactId>
-    <version>0.0.2</version>
+    <version>0.0.3</version>
 </dependency>
 
 <!-- Full stack (includes core) -->
 <dependency>
     <groupId>dev.suprim</groupId>
     <artifactId>suprim-jdbc</artifactId>
-    <version>0.0.2</version>
+    <version>0.0.3</version>
 </dependency>
 ```
 
@@ -44,7 +44,7 @@ Open-source type-safe SQL query builder for PostgreSQL, MySQL, and MariaDB.
                     <path>
                         <groupId>dev.suprim</groupId>
                         <artifactId>suprim-processor</artifactId>
-                        <version>0.0.2</version>
+                        <version>0.0.3</version>
                     </path>
                 </annotationProcessorPaths>
             </configuration>

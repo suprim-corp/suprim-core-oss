@@ -3,6 +3,7 @@ package sant1ago.dev.suprim.jdbc;
 import sant1ago.dev.suprim.annotation.entity.Column;
 import sant1ago.dev.suprim.annotation.type.GenerationType;
 import sant1ago.dev.suprim.annotation.type.IdGenerator;
+import sant1ago.dev.suprim.casey.Casey;
 import sant1ago.dev.suprim.core.util.UUIDUtils;
 import sant1ago.dev.suprim.core.dialect.MySqlDialect;
 import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
@@ -192,7 +193,7 @@ final class EntityPersistence {
             }
 
             String columnName = column.name().isEmpty()
-                ? ReflectionUtils.toSnakeCase(field.getName())
+                ? Casey.toSnakeCase(field.getName())
                 : column.name();
 
             // Skip ID column if database will generate it

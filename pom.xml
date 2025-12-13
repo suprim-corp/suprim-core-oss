@@ -6,7 +6,7 @@
 
     <groupId>dev.suprim</groupId>
     <artifactId>suprim-parent</artifactId>
-    <version>0.0.2</version>
+    <version>0.0.3</version>
     <packaging>pom</packaging>
 
     <name>Suprim OSS</name>
@@ -28,8 +28,7 @@
 
     <properties>
         <java.version>17</java.version>
-        <maven.compiler.source>${java.version}</maven.compiler.source>
-        <maven.compiler.target>${java.version}</maven.compiler.target>
+        <maven.compiler.release>${java.version}</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>5.10.1</junit.version>
         <slf4j.version>2.0.17</slf4j.version>
@@ -42,6 +41,13 @@
                 <groupId>dev.suprim</groupId>
                 <artifactId>suprim-core</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+
+            <!-- Casey - String case conversion (via JitPack) -->
+            <dependency>
+                <groupId>com.github.suprim-corp</groupId>
+                <artifactId>casey</artifactId>
+                <version>0.0.1</version>
             </dependency>
 
             <!-- SLF4J -->
@@ -58,6 +64,12 @@
                 <version>${junit.version}</version>
                 <scope>test</scope>
             </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-core</artifactId>
+                <version>5.21.0</version>
+                <scope>test</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -67,10 +79,9 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.13.0</version>
+                    <version>3.14.1</version>
                     <configuration>
-                        <source>${java.version}</source>
-                        <target>${java.version}</target>
+                        <release>${java.version}</release>
                     </configuration>
                 </plugin>
                 <plugin>
@@ -123,6 +134,13 @@
             </plugins>
         </pluginManagement>
     </build>
+
+    <repositories>
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
 
     <distributionManagement>
         <repository>

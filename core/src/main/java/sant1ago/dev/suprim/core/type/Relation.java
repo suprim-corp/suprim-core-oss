@@ -1,5 +1,7 @@
 package sant1ago.dev.suprim.core.type;
 
+import sant1ago.dev.suprim.casey.Casey;
+
 import java.util.List;
 import java.util.Objects;
 
@@ -919,7 +921,7 @@ public final class Relation<T, R> {
      * Converts relation field name to snake_case + "_count".
      */
     public String getCountAlias(String fieldName) {
-        return toSnakeCase(fieldName) + "_count";
+        return Casey.toSnakeCase(fieldName) + "_count";
     }
 
     /**
@@ -949,13 +951,6 @@ public final class Relation<T, R> {
      */
     public boolean requiresLimitOne() {
         return type.isOfMany();
-    }
-
-    private static String toSnakeCase(String camelCase) {
-        if (Objects.isNull(camelCase) || camelCase.isEmpty()) {
-            return camelCase;
-        }
-        return camelCase.replaceAll("([a-z])([A-Z])", "$1_$2").toLowerCase();
     }
 
     // ==================== Builder ====================

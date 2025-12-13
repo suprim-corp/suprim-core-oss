@@ -3,6 +3,7 @@ package sant1ago.dev.suprim.processor;
 import sant1ago.dev.suprim.annotation.entity.*;
 import sant1ago.dev.suprim.annotation.type.*;
 import sant1ago.dev.suprim.annotation.relationship.*;
+import sant1ago.dev.suprim.casey.Casey;
 import sant1ago.dev.suprim.processor.model.ColumnMetadata;
 import sant1ago.dev.suprim.processor.model.EntityMetadata;
 import sant1ago.dev.suprim.processor.model.RelationshipMetadata;
@@ -66,7 +67,7 @@ public class MetadataExtractor {
         Entity entityAnnotation = entityElement.getAnnotation(Entity.class);
         String tableName = nonNull(entityAnnotation) && !entityAnnotation.table().isEmpty()
                 ? entityAnnotation.table()
-                : toSnakeCase(entityElement.getSimpleName().toString());
+                : Casey.toSnakeCase(entityElement.getSimpleName().toString());
         String schema = nonNull(entityAnnotation) ? entityAnnotation.schema() : "";
 
         // Extract default eager loads from @Entity(with = {...})
@@ -175,7 +176,7 @@ public class MetadataExtractor {
         Column columnAnnot = field.getAnnotation(Column.class);
         String columnName = nonNull(columnAnnot) && !columnAnnot.name().isEmpty()
                 ? columnAnnot.name()
-                : toSnakeCase(field.getSimpleName().toString());
+                : Casey.toSnakeCase(field.getSimpleName().toString());
 
         String javaType = field.asType().toString();
         String sqlType = resolveSqlType(columnAnnot, javaType);
@@ -314,7 +315,7 @@ public class MetadataExtractor {
         if (nonNull(hasOne)) {
             EntityInfo related = extractEntityClass(field, HasOne.class.getName(), "entity");
             String fk = hasOne.foreignKey().isEmpty()
-                    ? toSnakeCase(stripTableSuffix(ownerTableName)) + "_id"
+                    ? Casey.toSnakeCase(stripTableSuffix(ownerTableName)) + "_id"
                     : hasOne.foreignKey();
 
             // Check for ofMany annotations
@@ -368,7 +369,7 @@ public class MetadataExtractor {
         if (nonNull(hasMany)) {
             EntityInfo related = extractEntityClass(field, HasMany.class.getName(), "entity");
             String fk = hasMany.foreignKey().isEmpty()
-                    ? toSnakeCase(stripTableSuffix(ownerTableName)) + "_id"
+                    ? Casey.toSnakeCase(stripTableSuffix(ownerTableName)) + "_id"
                     : hasMany.foreignKey();
             return new RelationshipMetadata(
                     fieldName,
@@ -395,7 +396,7 @@ public class MetadataExtractor {
         if (nonNull(belongsTo)) {
             EntityInfo related = extractEntityClass(field, BelongsTo.class.getName(), "entity");
             String fk = belongsTo.foreignKey().isEmpty()
-                    ? toSnakeCase(related.simpleName()) + "_id"
+                    ? Casey.toSnakeCase(related.simpleName()) + "_id"
                     : belongsTo.foreignKey();
             return new RelationshipMetadata(
                     fieldName,
@@ -426,8 +427,8 @@ public class MetadataExtractor {
         BelongsToMany belongsToMany = field.getAnnotation(BelongsToMany.class);
         if (nonNull(belongsToMany)) {
             EntityInfo related = extractEntityClass(field, BelongsToMany.class.getName(), "entity");
-            String ownerSnake = toSnakeCase(stripTableSuffix(ownerTableName));
-            String relatedSnake = toSnakeCase(related.simpleName());
+            String ownerSnake = Casey.toSnakeCase(stripTableSuffix(ownerTableName));
+            String relatedSnake = Casey.toSnakeCase(related.simpleName());
 
             // Pivot table: alphabetically sorted entity names
             String pivotTable = belongsToMany.table().isEmpty()
@@ -467,8 +468,8 @@ public class MetadataExtractor {
         if (nonNull(hasOneThrough)) {
             EntityInfo related = extractEntityClass(field, HasOneThrough.class.getName(), "entity");
             EntityInfo through = extractEntityClass(field, HasOneThrough.class.getName(), "through");
-            String ownerSnake = toSnakeCase(stripTableSuffix(ownerTableName));
-            String throughSnake = toSnakeCase(through.simpleName());
+            String ownerSnake = Casey.toSnakeCase(stripTableSuffix(ownerTableName));
+            String throughSnake = Casey.toSnakeCase(through.simpleName());
 
             // firstKey: FK on intermediate table pointing to this entity
             String firstKey = hasOneThrough.firstKey().isEmpty()
@@ -506,8 +507,8 @@ public class MetadataExtractor {
         if (nonNull(hasManyThrough)) {
             EntityInfo related = extractEntityClass(field, HasManyThrough.class.getName(), "entity");
             EntityInfo through = extractEntityClass(field, HasManyThrough.class.getName(), "through");
-            String ownerSnake = toSnakeCase(stripTableSuffix(ownerTableName));
-            String throughSnake = toSnakeCase(through.simpleName());
+            String ownerSnake = Casey.toSnakeCase(stripTableSuffix(ownerTableName));
+            String throughSnake = Casey.toSnakeCase(through.simpleName());
 
             // firstKey: FK on intermediate table pointing to this entity
             String firstKey = hasManyThrough.firstKey().isEmpty()
@@ -691,7 +692,7 @@ public class MetadataExtractor {
                 ? annotation.foreignPivotKey()
                 : (!annotation.id().isEmpty() ? annotation.id() : morphName + "_id");
 
-        String relatedSnake = toSnakeCase(related.simpleName());
+        String relatedSnake = Casey.toSnakeCase(related.simpleName());
         String relatedPivotKey = annotation.relatedPivotKey().isEmpty()
                 ? relatedSnake + "_id"
                 : annotation.relatedPivotKey();
@@ -737,7 +738,7 @@ public class MetadataExtractor {
         String morphTypeColumn = annotation.morphTypeColumn().isEmpty() ? morphName + "_type" : annotation.morphTypeColumn();
         String morphIdColumn = annotation.relatedPivotKey().isEmpty() ? morphName + "_id" : annotation.relatedPivotKey();
 
-        String ownerSnake = toSnakeCase(stripTableSuffix(ownerTableName));
+        String ownerSnake = Casey.toSnakeCase(stripTableSuffix(ownerTableName));
         String foreignPivotKey = annotation.foreignPivotKey().isEmpty()
                 ? ownerSnake + "_id"
                 : annotation.foreignPivotKey();
@@ -829,16 +830,4 @@ public class MetadataExtractor {
      * Helper record for extracted entity class info.
      */
     private record EntityInfo(String qualifiedName, String simpleName) {}
-
-    // ==================== UTILITY METHODS ====================
-
-    /**
-     * Convert camelCase to snake_case.
-     */
-    public static String toSnakeCase(String camelCase) {
-        if (isNull(camelCase) || camelCase.isEmpty()) {
-            return camelCase;
-        }
-        return camelCase.replaceAll("([a-z])([A-Z])", "$1_$2").toLowerCase();
-    }
 }

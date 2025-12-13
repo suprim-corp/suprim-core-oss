@@ -1,5 +1,7 @@
 package sant1ago.dev.suprim.jdbc;
 
+import sant1ago.dev.suprim.casey.Casey;
+
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Field;
@@ -92,7 +94,7 @@ public final class ReflectionUtils {
         }
 
         // Try converting snake_case to camelCase
-        String camelCaseFieldName = toCamelCase(fieldName);
+        String camelCaseFieldName = Casey.toCamelCase(fieldName);
         if (!camelCaseFieldName.equals(fieldName)) {
             value = getFieldValueInternal(entity, clazz, camelCaseFieldName);
             if (Objects.nonNull(value)) {
@@ -101,7 +103,7 @@ public final class ReflectionUtils {
         }
 
         // Try converting camelCase to snake_case
-        String snakeCaseFieldName = toSnakeCase(fieldName);
+        String snakeCaseFieldName = Casey.toSnakeCase(fieldName);
         if (!snakeCaseFieldName.equals(fieldName)) {
             value = getFieldValueInternal(entity, clazz, snakeCaseFieldName);
         }
@@ -256,7 +258,7 @@ public final class ReflectionUtils {
         }
 
         // Try converting snake_case to camelCase
-        String camelCaseFieldName = toCamelCase(fieldName);
+        String camelCaseFieldName = Casey.toCamelCase(fieldName);
         if (!camelCaseFieldName.equals(fieldName)) {
             if (setFieldValueInternal(entity, clazz, camelCaseFieldName, value)) {
                 return true;
@@ -264,7 +266,7 @@ public final class ReflectionUtils {
         }
 
         // Try converting camelCase to snake_case
-        String snakeCaseFieldName = toSnakeCase(fieldName);
+        String snakeCaseFieldName = Casey.toSnakeCase(fieldName);
         if (!snakeCaseFieldName.equals(fieldName)) {
             return setFieldValueInternal(entity, clazz, snakeCaseFieldName, value);
         }
@@ -416,58 +418,6 @@ public final class ReflectionUtils {
                     (paramType == char.class && valueType == Character.class);
         }
         return false;
-    }
-
-    /**
-     * Convert snake_case to camelCase.
-     * Example: "user_name" -> "userName"
-     */
-    public static String toCamelCase(String snakeCase) {
-        if (Objects.isNull(snakeCase) || snakeCase.isEmpty()) {
-            return snakeCase;
-        }
-
-        StringBuilder result = new StringBuilder();
-        boolean capitalizeNext = false;
-
-        for (char c : snakeCase.toCharArray()) {
-            if (c == '_') {
-                capitalizeNext = true;
-            } else {
-                if (capitalizeNext) {
-                    result.append(Character.toUpperCase(c));
-                    capitalizeNext = false;
-                } else {
-                    result.append(c);
-                }
-            }
-        }
-
-        return result.toString();
-    }
-
-    /**
-     * Convert camelCase to snake_case.
-     * Example: "userName" -> "user_name"
-     */
-    public static String toSnakeCase(String camelCase) {
-        if (Objects.isNull(camelCase) || camelCase.isEmpty()) {
-            return camelCase;
-        }
-
-        StringBuilder result = new StringBuilder();
-        for (int i = 0; i < camelCase.length(); i++) {
-            char c = camelCase.charAt(i);
-            if (Character.isUpperCase(c)) {
-                if (i > 0) {
-                    result.append('_');
-                }
-                result.append(Character.toLowerCase(c));
-            } else {
-                result.append(c);
-            }
-        }
-        return result.toString();
     }
 
     private static String capitalize(String str) {
