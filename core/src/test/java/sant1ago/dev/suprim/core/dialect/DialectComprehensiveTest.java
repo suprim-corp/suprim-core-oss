@@ -234,7 +234,7 @@ class DialectComprehensiveTest {
         @Test
         @DisplayName("PostgreSQL jsonContains uses @> operator")
         void postgresJsonContainsUsesContainsOperator() {
-            assertEquals("data @> '{\"active\":true}'::jsonb",
+            assertEquals("data @> CAST('{\"active\":true}' AS jsonb)",
                     POSTGRES.jsonContains("data", "{\"active\":true}"));
         }
 

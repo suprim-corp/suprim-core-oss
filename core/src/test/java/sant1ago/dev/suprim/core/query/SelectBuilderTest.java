@@ -66,7 +66,8 @@ class SelectBuilderTest {
             .where(TestUser_.EMAIL.eq("test@example.com"))
             .build();
 
-        assertTrue(result.sql().contains("WHERE users.\"email\" = 'test@example.com'"));
+        assertTrue(result.sql().contains("WHERE users.\"email\" = :p1"));
+        assertEquals("test@example.com", result.parameters().get("p1"));
     }
 
     @Test
@@ -77,7 +78,8 @@ class SelectBuilderTest {
             .where(TestUser_.EMAIL.ne("spam@example.com"))
             .build();
 
-        assertTrue(result.sql().contains("WHERE users.\"email\" != 'spam@example.com'"));
+        assertTrue(result.sql().contains("WHERE users.\"email\" != :p1"));
+        assertEquals("spam@example.com", result.parameters().get("p1"));
     }
 
     @Test
@@ -88,7 +90,8 @@ class SelectBuilderTest {
             .where(TestUser_.AGE.gt(18))
             .build();
 
-        assertTrue(result.sql().contains("WHERE users.\"age\" > 18"));
+        assertTrue(result.sql().contains("WHERE users.\"age\" > :p1"));
+        assertEquals(18, result.parameters().get("p1"));
     }
 
     @Test
@@ -99,7 +102,8 @@ class SelectBuilderTest {
             .where(TestUser_.AGE.gte(21))
             .build();
 
-        assertTrue(result.sql().contains("WHERE users.\"age\" >= 21"));
+        assertTrue(result.sql().contains("WHERE users.\"age\" >= :p1"));
+        assertEquals(21, result.parameters().get("p1"));
     }
 
     @Test
@@ -110,7 +114,8 @@ class SelectBuilderTest {
             .where(TestUser_.AGE.lt(65))
             .build();
 
-        assertTrue(result.sql().contains("WHERE users.\"age\" < 65"));
+        assertTrue(result.sql().contains("WHERE users.\"age\" < :p1"));
+        assertEquals(65, result.parameters().get("p1"));
     }
 
     @Test
@@ -121,7 +126,8 @@ class SelectBuilderTest {
             .where(TestUser_.AGE.lte(60))
             .build();
 
-        assertTrue(result.sql().contains("WHERE users.\"age\" <= 60"));
+        assertTrue(result.sql().contains("WHERE users.\"age\" <= :p1"));
+        assertEquals(60, result.parameters().get("p1"));
     }
 
     @Test
@@ -132,7 +138,11 @@ class SelectBuilderTest {
             .where(TestUser_.AGE.in(18, 21, 25, 30))
             .build();
 
-        assertTrue(result.sql().contains("WHERE users.\"age\" IN (18, 21, 25, 30)"));
+        assertTrue(result.sql().contains("WHERE users.\"age\" IN (:p1, :p2, :p3, :p4)"));
+        assertEquals(18, result.parameters().get("p1"));
+        assertEquals(21, result.parameters().get("p2"));
+        assertEquals(25, result.parameters().get("p3"));
+        assertEquals(30, result.parameters().get("p4"));
     }
 
     @Test
@@ -143,7 +153,10 @@ class SelectBuilderTest {
             .where(TestUser_.AGE.notIn(1, 2, 3))
             .build();
 
-        assertTrue(result.sql().contains("WHERE users.\"age\" NOT IN (1, 2, 3)"));
+        assertTrue(result.sql().contains("WHERE users.\"age\" NOT IN (:p1, :p2, :p3)"));
+        assertEquals(1, result.parameters().get("p1"));
+        assertEquals(2, result.parameters().get("p2"));
+        assertEquals(3, result.parameters().get("p3"));
     }
 
     @Test
@@ -154,7 +167,9 @@ class SelectBuilderTest {
             .where(TestUser_.AGE.between(18, 65))
             .build();
 
-        assertTrue(result.sql().contains("WHERE users.\"age\" BETWEEN 18 AND 65"));
+        assertTrue(result.sql().contains("WHERE users.\"age\" BETWEEN :p1 AND :p2"));
+        assertEquals(18, result.parameters().get("p1"));
+        assertEquals(65, result.parameters().get("p2"));
     }
 
     @Test
@@ -192,9 +207,11 @@ class SelectBuilderTest {
 
         String sql = result.sql();
         assertTrue(sql.contains("WHERE"));
-        assertTrue(sql.contains("users.\"age\" >= 18"));
+        assertTrue(sql.contains("users.\"age\" >= :p1"));
         assertTrue(sql.contains("AND"));
-        assertTrue(sql.contains("users.\"is_active\""));
+        assertTrue(sql.contains("users.\"is_active\" = :p2"));
+        assertEquals(18, result.parameters().get("p1"));
+        assertEquals(true, result.parameters().get("p2"));
     }
 
     @Test
@@ -208,9 +225,11 @@ class SelectBuilderTest {
 
         String sql = result.sql();
         assertTrue(sql.contains("WHERE"));
-        assertTrue(sql.contains("users.\"age\" < 18"));
+        assertTrue(sql.contains("users.\"age\" < :p1"));
         assertTrue(sql.contains("OR"));
-        assertTrue(sql.contains("users.\"age\" > 65"));
+        assertTrue(sql.contains("users.\"age\" > :p2"));
+        assertEquals(18, result.parameters().get("p1"));
+        assertEquals(65, result.parameters().get("p2"));
     }
 
     @Test
@@ -357,7 +376,8 @@ class SelectBuilderTest {
 
         String sql = result.sql();
         assertTrue(sql.contains("GROUP BY users.\"age\""));
-        assertTrue(sql.contains("HAVING users.\"age\" > 18"));
+        assertTrue(sql.contains("HAVING users.\"age\" > :p1"));
+        assertEquals(18, result.parameters().get("p1"));
     }
 
     // ==================== JOINS ====================

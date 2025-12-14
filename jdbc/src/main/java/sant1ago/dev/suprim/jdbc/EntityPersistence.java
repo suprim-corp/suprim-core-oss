@@ -1,8 +1,10 @@
 package sant1ago.dev.suprim.jdbc;
 
 import sant1ago.dev.suprim.annotation.entity.Column;
+import sant1ago.dev.suprim.annotation.entity.JsonbColumn;
 import sant1ago.dev.suprim.annotation.type.GenerationType;
 import sant1ago.dev.suprim.annotation.type.IdGenerator;
+import sant1ago.dev.suprim.annotation.type.SqlType;
 import sant1ago.dev.suprim.casey.Casey;
 import sant1ago.dev.suprim.core.util.UUIDUtils;
 import sant1ago.dev.suprim.core.dialect.MySqlDialect;
@@ -17,6 +19,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.*;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -186,7 +189,7 @@ final class EntityPersistence {
         Map<String, Object> columns = new LinkedHashMap<>();
         Class<?> entityClass = entity.getClass();
 
-        for (Field field : entityClass.getDeclaredFields()) {
+        for (Field field : getAllFields(entityClass)) {
             Column column = field.getAnnotation(Column.class);
             if (Objects.isNull(column)) {
                 continue;
@@ -203,6 +206,19 @@ final class EntityPersistence {
 
             Object value = ReflectionUtils.getFieldValue(entity, field.getName());
             if (Objects.nonNull(value)) {
+                // Convert @JsonbColumn fields to PGobject for PostgreSQL JSONB
+                if (field.isAnnotationPresent(JsonbColumn.class)) {
+                    value = EntityReflector.toJsonbObject(value);
+                }
+                // Convert String to UUID for SqlType.UUID columns
+                if (column.type() == SqlType.UUID && value instanceof String str) {
+                    try {
+                        value = UUID.fromString(str);
+                    } catch (IllegalArgumentException e) {
+                        throw new IllegalArgumentException(
+                            "Invalid UUID format for column '" + columnName + "': " + str, e);
+                    }
+                }
                 columns.put(columnName, value);
             }
         }
@@ -211,6 +227,15 @@ final class EntityPersistence {
         if (!skipId) {
             Object idValue = EntityReflector.getIdOrNull(entity);
             if (Objects.nonNull(idValue)) {
+                // Convert String ID to UUID only if column type is UUID
+                if (idMeta.columnType() == SqlType.UUID && idValue instanceof String str) {
+                    try {
+                        idValue = UUID.fromString(str);
+                    } catch (IllegalArgumentException e) {
+                        throw new IllegalArgumentException(
+                            "Invalid UUID format for ID column '" + idMeta.columnName() + "': " + str, e);
+                    }
+                }
                 columns.put(idMeta.columnName(), idValue);
             }
         }
@@ -376,5 +401,18 @@ final class EntityPersistence {
         }
 
         return value;
+    }
+
+    /**
+     * Get all fields for a class including inherited fields from parent classes.
+     */
+    private static Field[] getAllFields(Class<?> clazz) {
+        List<Field> fields = new ArrayList<>();
+        Class<?> current = clazz;
+        while (Objects.nonNull(current) && current != Object.class) {
+            fields.addAll(Arrays.asList(current.getDeclaredFields()));
+            current = current.getSuperclass();
+        }
+        return fields.toArray(new Field[0]);
     }
 }

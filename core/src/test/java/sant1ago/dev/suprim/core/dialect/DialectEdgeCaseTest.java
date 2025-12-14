@@ -446,7 +446,7 @@ class DialectEdgeCaseTest {
         void postgresJsonContainsComplex() {
             String result = POSTGRES.jsonContains("data", "{\"nested\":{\"key\":\"value\"}}");
             assertTrue(result.contains("@>"), "Should use @>: " + result);
-            assertTrue(result.contains("::jsonb"), "Should cast to jsonb: " + result);
+            assertTrue(result.contains("AS jsonb)"), "Should cast to jsonb: " + result);
         }
 
         @Test

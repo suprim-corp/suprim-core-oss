@@ -217,7 +217,8 @@ class FnTest {
                 .where(Fn.lower(TestUser_.EMAIL).eq("test@example.com"))
                 .build();
 
-            assertTrue(result.sql().contains("WHERE LOWER(users.\"email\") = 'test@example.com'"));
+            assertTrue(result.sql().contains("WHERE LOWER(users.\"email\") = :p1"));
+            assertEquals("test@example.com", result.parameters().get("p1"));
         }
     }
 
@@ -480,7 +481,8 @@ class FnTest {
                 .where(Fn.rawTyped(Integer.class, "EXTRACT(YEAR FROM ?)", TestUser_.CREATED_AT).eq(2024))
                 .build();
 
-            assertTrue(result.sql().contains("WHERE EXTRACT(YEAR FROM users.\"created_at\") = 2024"));
+            assertTrue(result.sql().contains("WHERE EXTRACT(YEAR FROM users.\"created_at\") = :p1"));
+            assertEquals(2024, result.parameters().get("p1"));
         }
     }
 

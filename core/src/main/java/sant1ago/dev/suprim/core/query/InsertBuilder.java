@@ -5,6 +5,7 @@ import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.core.dialect.UnsupportedDialectFeatureException;
 import sant1ago.dev.suprim.core.type.Column;
 import sant1ago.dev.suprim.core.type.Expression;
+import sant1ago.dev.suprim.core.type.JsonbColumn;
 import sant1ago.dev.suprim.core.type.Table;
 import sant1ago.dev.suprim.core.util.IdMetadata;
 
@@ -122,7 +123,12 @@ public final class InsertBuilder<T> {
                 valuePlaceholders.add(cv.expression().toSql(dialect));
             } else {
                 String paramName = "p" + (++paramCounter);
-                valuePlaceholders.add(":" + paramName);
+                // JSONB columns need CAST for PostgreSQL
+                if (cv.column() instanceof JsonbColumn && dialect.capabilities().supportsJsonb()) {
+                    valuePlaceholders.add("CAST(:" + paramName + " AS jsonb)");
+                } else {
+                    valuePlaceholders.add(":" + paramName);
+                }
                 parameters.put(paramName, cv.value());
             }
         }

@@ -1355,6 +1355,9 @@ public final class SelectBuilder {
         // Apply default eager loads from @Entity(with = {...}) annotation
         mergeDefaultEagerLoads();
 
+        // Create parameter context for collecting WHERE/HAVING parameters
+        ParameterContext paramContext = new ParameterContext();
+
         StringBuilder sql = new StringBuilder();
 
         // CTEs (WITH clause)
@@ -1388,21 +1391,21 @@ public final class SelectBuilder {
             sql.append(" FROM ").append(fromTable.toSql(dialect));
         }
 
-        // JOINs
+        // JOINs (use parameterized predicates)
         for (JoinClause join : joins) {
             if (join.type() == JoinType.RAW) {
                 // Raw join - the predicate contains the full join SQL
-                sql.append(" ").append(join.on().toSql(dialect));
+                sql.append(" ").append(join.on().toSql(dialect, paramContext));
             } else {
                 sql.append(" ").append(join.type().getSql())
                         .append(" ").append(join.table().toSql(dialect))
-                        .append(" ON ").append(join.on().toSql(dialect));
+                        .append(" ON ").append(join.on().toSql(dialect, paramContext));
             }
         }
 
-        // WHERE
+        // WHERE (use parameterized predicates)
         if (nonNull(whereClause)) {
-            sql.append(" WHERE ").append(whereClause.toSql(dialect));
+            sql.append(" WHERE ").append(whereClause.toSql(dialect, paramContext));
         }
 
         // GROUP BY
@@ -1413,9 +1416,9 @@ public final class SelectBuilder {
                     .collect(Collectors.joining(", ")));
         }
 
-        // HAVING
+        // HAVING (use parameterized predicates)
         if (nonNull(havingClause)) {
-            sql.append(" HAVING ").append(havingClause.toSql(dialect));
+            sql.append(" HAVING ").append(havingClause.toSql(dialect, paramContext));
         }
 
         // SET OPERATIONS (UNION, INTERSECT, EXCEPT)
@@ -1455,7 +1458,11 @@ public final class SelectBuilder {
             sql.append(" ").append(lockMode);
         }
 
-        return new QueryResult(sql.toString(), parameters, new ArrayList<>(eagerLoads));
+        // Merge predicate parameters with existing parameters
+        Map<String, Object> allParams = new LinkedHashMap<>(parameters);
+        allParams.putAll(paramContext.getParameters());
+
+        return new QueryResult(sql.toString(), allParams, new ArrayList<>(eagerLoads));
     }
 
     private String nextParamName() {

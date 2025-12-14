@@ -2,9 +2,12 @@ package sant1ago.dev.suprim.core.query;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import sant1ago.dev.suprim.annotation.entity.Entity;
 import sant1ago.dev.suprim.core.TestUser_;
 import sant1ago.dev.suprim.core.dialect.MySqlDialect;
 import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
+import sant1ago.dev.suprim.core.type.JsonbColumn;
+import sant1ago.dev.suprim.core.type.Table;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -226,5 +229,36 @@ class UpdateBuilderTest {
         assertTrue(sql.contains("UPDATE \"users\""));
         assertTrue(sql.contains("WHERE"));
         assertTrue(sql.contains("age"));
+    }
+
+    // ==================== JSONB CAST Tests ====================
+
+    @Entity(table = "jobs")
+    static class Job {}
+
+    private static final Table<Job> JOBS = Table.of("jobs", Job.class);
+    private static final JsonbColumn<Job> PAYLOAD = new JsonbColumn<>(JOBS, "payload", "JSONB");
+
+    @Test
+    @DisplayName("Update with JsonbColumn wraps param with CAST for PostgreSQL")
+    void testUpdateWithJsonbColumnPostgres() {
+        QueryResult result = Suprim.update(JOBS)
+            .set(PAYLOAD, "{\"key\": \"value\"}")
+            .build(PostgreSqlDialect.INSTANCE);
+
+        String sql = result.sql();
+        assertTrue(sql.contains("CAST(:p1 AS jsonb)"), "PostgreSQL should wrap JSONB param with CAST: " + sql);
+    }
+
+    @Test
+    @DisplayName("Update with JsonbColumn no CAST for MySQL")
+    void testUpdateWithJsonbColumnMySql() {
+        QueryResult result = Suprim.update(JOBS)
+            .set(PAYLOAD, "{\"key\": \"value\"}")
+            .build(MySqlDialect.INSTANCE);
+
+        String sql = result.sql();
+        assertFalse(sql.contains("CAST("), "MySQL should not wrap with CAST: " + sql);
+        assertTrue(sql.contains(":p1"), "MySQL should use plain param: " + sql);
     }
 }

@@ -35,7 +35,7 @@ public final class ReflectionUtils {
     private static final Map<String, MethodHandle> GETTER_CACHE = new ConcurrentHashMap<>();
     private static final Map<String, MethodHandle> SETTER_CACHE = new ConcurrentHashMap<>();
     private static final Map<String, Field> FIELD_CACHE = new ConcurrentHashMap<>();
-    private static final MethodHandles.Lookup PUBLIC_LOOKUP = MethodHandles.publicLookup();
+    private static final Map<Class<?>, MethodHandles.Lookup> PRIVATE_LOOKUP_CACHE = new ConcurrentHashMap<>();
 
     /**
      * Strict mode flag. When true, disables private field fallback.
@@ -49,6 +49,20 @@ public final class ReflectionUtils {
 
     private ReflectionUtils() {
         // Utility class
+    }
+
+    /**
+     * Get a private lookup for the given class.
+     * Uses privateLookupIn for better access in Java 9+ module system.
+     */
+    private static MethodHandles.Lookup getPrivateLookup(Class<?> clazz) {
+        return PRIVATE_LOOKUP_CACHE.computeIfAbsent(clazz, c -> {
+            try {
+                return MethodHandles.privateLookupIn(c, MethodHandles.lookup());
+            } catch (IllegalAccessException e) {
+                return MethodHandles.lookup();
+            }
+        });
     }
 
     /**
@@ -164,7 +178,7 @@ public final class ReflectionUtils {
             for (RecordComponent component : clazz.getRecordComponents()) {
                 if (component.getName().equals(fieldName)) {
                     Method accessor = component.getAccessor();
-                    return PUBLIC_LOOKUP.unreflect(accessor);
+                    return getPrivateLookup(clazz).unreflect(accessor);
                 }
             }
         } catch (Exception e) {
@@ -179,7 +193,7 @@ public final class ReflectionUtils {
         // Try getX()
         try {
             Method getter = clazz.getMethod("get" + capitalizedName);
-            return PUBLIC_LOOKUP.unreflect(getter);
+            return getPrivateLookup(clazz).unreflect(getter);
         } catch (NoSuchMethodException | IllegalAccessException e) {
             // Try isX() for booleans
         }
@@ -187,7 +201,7 @@ public final class ReflectionUtils {
         // Try isX()
         try {
             Method getter = clazz.getMethod("is" + capitalizedName);
-            return PUBLIC_LOOKUP.unreflect(getter);
+            return getPrivateLookup(clazz).unreflect(getter);
         } catch (NoSuchMethodException | IllegalAccessException e) {
             // No getter found
         }
@@ -196,7 +210,7 @@ public final class ReflectionUtils {
         try {
             Method getter = clazz.getMethod(fieldName);
             if (getter.getParameterCount() == 0) {
-                return PUBLIC_LOOKUP.unreflect(getter);
+                return getPrivateLookup(clazz).unreflect(getter);
             }
         } catch (NoSuchMethodException | IllegalAccessException e) {
             // No direct accessor
@@ -208,7 +222,7 @@ public final class ReflectionUtils {
     private static MethodHandle findPublicFieldGetter(Class<?> clazz, String fieldName) {
         try {
             Field field = clazz.getField(fieldName);
-            return PUBLIC_LOOKUP.unreflectGetter(field);
+            return getPrivateLookup(clazz).unreflectGetter(field);
         } catch (NoSuchFieldException | IllegalAccessException e) {
             return null;
         }
@@ -228,7 +242,7 @@ public final class ReflectionUtils {
             logPrivateAccessWarning(clazz, fieldName, "getter");
 
             field.setAccessible(true);
-            return MethodHandles.lookup().unreflectGetter(field);
+            return getPrivateLookup(clazz).unreflectGetter(field);
         } catch (Exception e) {
             return null;
         }
@@ -321,11 +335,25 @@ public final class ReflectionUtils {
         for (Method method : clazz.getMethods()) {
             if (method.getName().equals(setterName) && method.getParameterCount() == 1) {
                 Class<?> paramType = method.getParameterTypes()[0];
-                if (Objects.isNull(value) || paramType.isAssignableFrom(value.getClass()) || isBoxedMatch(paramType, value.getClass())) {
+                Class<?> valueType = Objects.isNull(value) ? null : value.getClass();
+                boolean typeMatch = Objects.isNull(value) || paramType.isAssignableFrom(valueType) || isBoxedMatch(paramType, valueType);
+
+                if (!typeMatch) {
+                    LOGGER.debug("Suprim: Type mismatch for {}.{} - paramType={}, valueType={}",
+                        clazz.getSimpleName(), setterName, paramType.getName(),
+                        valueType.getName()
+                    );
+                    continue;
+                }
+
+                try {
+                    return getPrivateLookup(clazz).unreflect(method);
+                } catch (IllegalAccessException e) {
+                    LOGGER.debug("Suprim: privateLookup failed for {}.{}: {}", clazz.getSimpleName(), setterName, e.getMessage());
                     try {
-                        return PUBLIC_LOOKUP.unreflect(method);
-                    } catch (IllegalAccessException e) {
-                        // Continue searching
+                        return MethodHandles.publicLookup().unreflect(method);
+                    } catch (IllegalAccessException ex) {
+                        LOGGER.debug("Suprim: publicLookup also failed for {}.{}: {}", clazz.getSimpleName(), setterName, ex.getMessage());
                     }
                 }
             }
@@ -336,7 +364,7 @@ public final class ReflectionUtils {
     private static MethodHandle findPublicFieldSetter(Class<?> clazz, String fieldName) {
         try {
             Field field = clazz.getField(fieldName);
-            return PUBLIC_LOOKUP.unreflectSetter(field);
+            return getPrivateLookup(clazz).unreflectSetter(field);
         } catch (NoSuchFieldException | IllegalAccessException e) {
             return null;
         }
@@ -356,7 +384,7 @@ public final class ReflectionUtils {
             logPrivateAccessWarning(clazz, fieldName, "setter");
 
             field.setAccessible(true);
-            return MethodHandles.lookup().unreflectSetter(field);
+            return getPrivateLookup(clazz).unreflectSetter(field);
         } catch (Exception e) {
             return null;
         }
@@ -435,5 +463,6 @@ public final class ReflectionUtils {
         SETTER_CACHE.clear();
         FIELD_CACHE.clear();
         WARNED_FIELDS.clear();
+        PRIVATE_LOOKUP_CACHE.clear();
     }
 }

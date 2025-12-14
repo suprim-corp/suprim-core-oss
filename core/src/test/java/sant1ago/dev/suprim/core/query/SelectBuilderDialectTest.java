@@ -195,10 +195,11 @@ class SelectBuilderDialectTest {
         @MethodSource("sant1ago.dev.suprim.core.query.SelectBuilderDialectTest#allDialects")
         @DisplayName("WHERE equals")
         void whereEq(SqlDialect dialect) {
-            String sql = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
-                    .where(TestUser_.EMAIL.eq("test@example.com")).build(dialect).sql();
-            assertTrue(sql.toUpperCase().contains("WHERE"), "Should have WHERE: " + sql);
-            assertTrue(sql.contains("= 'test@example.com'"), "Should have value: " + sql);
+            var result = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
+                    .where(TestUser_.EMAIL.eq("test@example.com")).build(dialect);
+            assertTrue(result.sql().toUpperCase().contains("WHERE"), "Should have WHERE: " + result.sql());
+            assertTrue(result.sql().contains(":p1"), "Should use parameter: " + result.sql());
+            assertEquals("test@example.com", result.parameters().get("p1"));
         }
 
         @ParameterizedTest
@@ -214,36 +215,40 @@ class SelectBuilderDialectTest {
         @MethodSource("sant1ago.dev.suprim.core.query.SelectBuilderDialectTest#allDialects")
         @DisplayName("WHERE greater than")
         void whereGt(SqlDialect dialect) {
-            String sql = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
-                    .where(TestUser_.AGE.gt(18)).build(dialect).sql();
-            assertTrue(sql.contains("> 18"), "Should have > 18: " + sql);
+            var result = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
+                    .where(TestUser_.AGE.gt(18)).build(dialect);
+            assertTrue(result.sql().contains("> :p1"), "Should have > :p1: " + result.sql());
+            assertEquals(18, result.parameters().get("p1"));
         }
 
         @ParameterizedTest
         @MethodSource("sant1ago.dev.suprim.core.query.SelectBuilderDialectTest#allDialects")
         @DisplayName("WHERE greater than or equals")
         void whereGte(SqlDialect dialect) {
-            String sql = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
-                    .where(TestUser_.AGE.gte(21)).build(dialect).sql();
-            assertTrue(sql.contains(">= 21"), "Should have >= 21: " + sql);
+            var result = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
+                    .where(TestUser_.AGE.gte(21)).build(dialect);
+            assertTrue(result.sql().contains(">= :p1"), "Should have >= :p1: " + result.sql());
+            assertEquals(21, result.parameters().get("p1"));
         }
 
         @ParameterizedTest
         @MethodSource("sant1ago.dev.suprim.core.query.SelectBuilderDialectTest#allDialects")
         @DisplayName("WHERE less than")
         void whereLt(SqlDialect dialect) {
-            String sql = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
-                    .where(TestUser_.AGE.lt(65)).build(dialect).sql();
-            assertTrue(sql.contains("< 65"), "Should have < 65: " + sql);
+            var result = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
+                    .where(TestUser_.AGE.lt(65)).build(dialect);
+            assertTrue(result.sql().contains("< :p1"), "Should have < :p1: " + result.sql());
+            assertEquals(65, result.parameters().get("p1"));
         }
 
         @ParameterizedTest
         @MethodSource("sant1ago.dev.suprim.core.query.SelectBuilderDialectTest#allDialects")
         @DisplayName("WHERE less than or equals")
         void whereLte(SqlDialect dialect) {
-            String sql = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
-                    .where(TestUser_.AGE.lte(60)).build(dialect).sql();
-            assertTrue(sql.contains("<= 60"), "Should have <= 60: " + sql);
+            var result = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
+                    .where(TestUser_.AGE.lte(60)).build(dialect);
+            assertTrue(result.sql().contains("<= :p1"), "Should have <= :p1: " + result.sql());
+            assertEquals(60, result.parameters().get("p1"));
         }
 
         @ParameterizedTest
@@ -367,35 +372,39 @@ class SelectBuilderDialectTest {
         }
 
         @Test
-        @DisplayName("WHERE string escaping - PostgreSQL")
+        @DisplayName("WHERE string escaping - PostgreSQL uses parameters")
         void whereStringEscapingPostgreSql() {
-            String sql = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
-                    .where(TestUser_.NAME.eq("O'Brien")).build(POSTGRES).sql();
-            assertTrue(sql.contains("''"), "Should escape quote: " + sql);
+            var result = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
+                    .where(TestUser_.NAME.eq("O'Brien")).build(POSTGRES);
+            assertTrue(result.sql().contains(":p1"), "Should use parameter: " + result.sql());
+            assertEquals("O'Brien", result.parameters().get("p1"));
         }
 
         @Test
-        @DisplayName("WHERE string escaping - MySQL")
+        @DisplayName("WHERE string escaping - MySQL uses parameters")
         void whereStringEscapingMySql() {
-            String sql = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
-                    .where(TestUser_.NAME.eq("O'Brien")).build(MYSQL).sql();
-            assertTrue(sql.contains("''"), "Should escape quote: " + sql);
+            var result = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
+                    .where(TestUser_.NAME.eq("O'Brien")).build(MYSQL);
+            assertTrue(result.sql().contains(":p1"), "Should use parameter: " + result.sql());
+            assertEquals("O'Brien", result.parameters().get("p1"));
         }
 
         @Test
-        @DisplayName("WHERE backslash - PostgreSQL")
+        @DisplayName("WHERE backslash - PostgreSQL uses parameters")
         void whereBackslashPostgreSql() {
-            String sql = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
-                    .where(TestUser_.NAME.eq("C:\\path")).build(POSTGRES).sql();
-            assertTrue(sql.contains("C:\\path"), "PostgreSQL preserves backslash: " + sql);
+            var result = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
+                    .where(TestUser_.NAME.eq("C:\\path")).build(POSTGRES);
+            assertTrue(result.sql().contains(":p1"), "Should use parameter: " + result.sql());
+            assertEquals("C:\\path", result.parameters().get("p1"));
         }
 
         @Test
-        @DisplayName("WHERE backslash - MySQL escapes")
+        @DisplayName("WHERE backslash - MySQL uses parameters")
         void whereBackslashMySql() {
-            String sql = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
-                    .where(TestUser_.NAME.eq("C:\\path")).build(MYSQL).sql();
-            assertTrue(sql.contains("\\\\"), "MySQL escapes backslash: " + sql);
+            var result = Suprim.select(TestUser_.ID).from(TestUser_.TABLE)
+                    .where(TestUser_.NAME.eq("C:\\path")).build(MYSQL);
+            assertTrue(result.sql().contains(":p1"), "Should use parameter: " + result.sql());
+            assertEquals("C:\\path", result.parameters().get("p1"));
         }
     }
 

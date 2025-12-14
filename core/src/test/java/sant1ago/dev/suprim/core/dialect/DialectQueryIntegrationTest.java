@@ -276,68 +276,75 @@ class DialectQueryIntegrationTest {
         }
 
         @Test
-        @DisplayName("PostgreSQL boolean uses TRUE/FALSE")
+        @DisplayName("PostgreSQL boolean uses parameters")
         void postgresBooleanFormat() {
-            String sql = new SelectBuilder(List.of())
+            var result = new SelectBuilder(List.of())
                     .from(USERS)
                     .where(USER_ACTIVE.eq(true))
-                    .build(POSTGRES).sql();
+                    .build(POSTGRES);
 
-            assertTrue(sql.contains("TRUE"), "PostgreSQL should use TRUE: " + sql);
+            assertTrue(result.sql().contains(":p1"), "Should use parameter: " + result.sql());
+            assertEquals(true, result.parameters().get("p1"));
         }
 
         @ParameterizedTest
         @MethodSource("sant1ago.dev.suprim.core.dialect.DialectQueryIntegrationTest#mysqlFamily")
-        @DisplayName("MySQL boolean uses TRUE/FALSE")
+        @DisplayName("MySQL boolean uses parameters")
         void mysqlBooleanFormat(SqlDialect dialect) {
-            String sql = new SelectBuilder(List.of())
+            var result = new SelectBuilder(List.of())
                     .from(USERS)
                     .where(USER_ACTIVE.eq(true))
-                    .build(dialect).sql();
+                    .build(dialect);
 
-            assertTrue(sql.contains("= TRUE"), "MySQL should use TRUE: " + sql);
+            assertTrue(result.sql().contains(":p1"), "Should use parameter: " + result.sql());
+            assertEquals(true, result.parameters().get("p1"));
         }
     }
 
-    // ==================== String Escaping Tests ====================
+    // ==================== String Values as Parameters Tests ====================
 
     @Nested
-    @DisplayName("String Escaping in Queries")
+    @DisplayName("String Values as Parameters")
     class StringEscapingTests {
 
         @ParameterizedTest
         @MethodSource("sant1ago.dev.suprim.core.dialect.DialectQueryIntegrationTest#allDialects")
-        @DisplayName("Single quote in value is escaped")
+        @DisplayName("String values are parameterized")
         void singleQuoteEscaped(SqlDialect dialect) {
-            String sql = new SelectBuilder(List.of())
+            var result = new SelectBuilder(List.of())
                     .from(USERS)
                     .where(USER_NAME.eq("O'Brien"))
-                    .build(dialect).sql();
+                    .build(dialect);
 
-            assertTrue(sql.contains("''"), "Quote should be escaped: " + sql);
+            // Value should be in parameters, not inline SQL
+            assertTrue(result.sql().contains(":p1"), "Should use parameter: " + result.sql());
+            assertEquals("O'Brien", result.parameters().get("p1"));
         }
 
         @Test
-        @DisplayName("MySQL escapes backslash")
+        @DisplayName("MySQL uses parameters for string values")
         void mysqlBackslashEscaped() {
-            String sql = new SelectBuilder(List.of())
+            var result = new SelectBuilder(List.of())
                     .from(USERS)
                     .where(USER_NAME.eq("C:\\path"))
-                    .build(MYSQL).sql();
+                    .build(MYSQL);
 
-            assertTrue(sql.contains("\\\\"), "MySQL should escape backslash: " + sql);
+            // Value should be in parameters, not inline SQL
+            assertTrue(result.sql().contains(":p1"), "Should use parameter: " + result.sql());
+            assertEquals("C:\\path", result.parameters().get("p1"));
         }
 
         @Test
-        @DisplayName("PostgreSQL preserves backslash")
+        @DisplayName("PostgreSQL uses parameters for string values")
         void postgresBackslashPreserved() {
-            String sql = new SelectBuilder(List.of())
+            var result = new SelectBuilder(List.of())
                     .from(USERS)
                     .where(USER_NAME.eq("C:\\path"))
-                    .build(POSTGRES).sql();
+                    .build(POSTGRES);
 
-            // PostgreSQL doesn't escape backslash - it stays as single backslash in string
-            assertTrue(sql.contains("C:\\path"), "PostgreSQL should preserve backslash: " + sql);
+            // Value should be in parameters, not inline SQL
+            assertTrue(result.sql().contains(":p1"), "Should use parameter: " + result.sql());
+            assertEquals("C:\\path", result.parameters().get("p1"));
         }
     }
 
