@@ -199,4 +199,17 @@ class DeleteBuilderTest {
         assertTrue(sql.contains("DELETE FROM \"users\""));
         assertTrue(sql.contains("LIKE"));
     }
+
+    @Test
+    @DisplayName("and() without prior where() sets whereClause")
+    void testAndWithoutPriorWhere() {
+        QueryResult result = Suprim.deleteFrom(TestUser_.TABLE)
+            .and(TestUser_.IS_ACTIVE.eq(false))
+            .build();
+
+        String sql = result.sql();
+        assertTrue(sql.contains("DELETE FROM \"users\""));
+        assertTrue(sql.contains("WHERE"));
+        assertTrue(sql.contains("is_active"));
+    }
 }

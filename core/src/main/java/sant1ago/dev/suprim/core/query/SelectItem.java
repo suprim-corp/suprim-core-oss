@@ -1,15 +1,21 @@
 package sant1ago.dev.suprim.core.query;
 
 import sant1ago.dev.suprim.core.dialect.SqlDialect;
+import sant1ago.dev.suprim.core.dialect.UnsupportedDialectFeatureException;
 import sant1ago.dev.suprim.core.type.AliasedColumn;
 import sant1ago.dev.suprim.core.type.Column;
 import sant1ago.dev.suprim.core.type.Expression;
+import sant1ago.dev.suprim.core.type.Predicate;
+import sant1ago.dev.suprim.core.type.Relation;
+
+import java.util.Objects;
+import java.util.function.Function;
 
 /**
  * Type-safe representation of items that can appear in a SELECT clause.
  * Supports Column, AliasedColumn, Aggregate, Coalesce, JSONB expressions, or raw SQL.
  */
-public sealed interface SelectItem permits SelectItem.ColumnItem, SelectItem.AliasedItem, SelectItem.RawItem, SelectItem.ExpressionItem {
+public sealed interface SelectItem permits SelectItem.ColumnItem, SelectItem.AliasedItem, SelectItem.RawItem, SelectItem.ExpressionItem, SelectItem.CountFilterItem, SelectItem.SubqueryItem {
 
     /**
      * Render this select item as SQL.
@@ -98,5 +104,119 @@ public sealed interface SelectItem permits SelectItem.ColumnItem, SelectItem.Ali
         public String toSql(SqlDialect dialect) {
             return expression.toSql(dialect);
         }
+    }
+
+    /**
+     * COUNT with FILTER clause (PostgreSQL-specific).
+     * Defers SQL generation to build time for proper dialect handling.
+     *
+     * @param column the column to count
+     * @param filter optional filter predicate (can be null)
+     * @param alias the alias for the result
+     */
+    record CountFilterItem(Column<?, ?> column, Predicate filter, String alias) implements SelectItem {
+        @Override
+        public String toSql(SqlDialect dialect) {
+            String columnSql = column.toSql(dialect);
+            String countExpr = "COUNT(" + columnSql + ")";
+
+            if (Objects.nonNull(filter)) {
+                if (!dialect.capabilities().supportsFilterClause()) {
+                    throw new UnsupportedDialectFeatureException("FILTER clause", dialect.getName(),
+                            "Use CASE WHEN for conditional counting");
+                }
+                countExpr = dialect.aggregateFilter(countExpr, filter.toSql(dialect));
+            }
+
+            return countExpr + " AS " + alias;
+        }
+    }
+
+    /**
+     * Factory method for CountFilterItem.
+     */
+    static SelectItem countFilter(Column<?, ?> column, Predicate filter, String alias) {
+        return new CountFilterItem(column, filter, alias);
+    }
+
+    /**
+     * Deferred subquery select item for relation aggregates (COUNT, SUM, MAX, etc.).
+     * Stores components and generates SQL at build time with correct dialect.
+     *
+     * @param subqueryType the type of subquery (COUNT, SUM, MAX, MIN, AVG, EXISTS)
+     * @param relation the relationship to query
+     * @param column the column for aggregation (null for EXISTS/COUNT(*))
+     * @param constraint optional additional constraints
+     * @param alias the alias for the result
+     * @param ownerTableName the owner table name for correlation
+     */
+    record SubqueryItem(
+            SubqueryType subqueryType,
+            Relation<?, ?> relation,
+            Column<?, ?> column,
+            Function<SelectBuilder, SelectBuilder> constraint,
+            String alias,
+            String ownerTableName
+    ) implements SelectItem {
+
+        @Override
+        public String toSql(SqlDialect dialect) {
+            StringBuilder sql = new StringBuilder();
+
+            // Handle all subquery types - use switch expression for exhaustiveness check
+            String prefix = switch (subqueryType) {
+                case EXISTS -> "EXISTS(SELECT 1";
+                case COUNT -> "(SELECT COUNT(*)";
+                case SUM -> "(SELECT SUM(" + column.getName() + ")";
+                case MAX -> "(SELECT MAX(" + column.getName() + ")";
+                case MIN -> "(SELECT MIN(" + column.getName() + ")";
+                case AVG -> "(SELECT AVG(" + column.getName() + ")";
+            };
+            sql.append(prefix);
+
+            sql.append(" FROM ").append(relation.getExistsFromTable());
+
+            // For BelongsToMany, add pivot table join
+            String pivotJoin = relation.getPivotJoinForExists();
+            if (Objects.nonNull(pivotJoin)) {
+                sql.append(" ").append(pivotJoin);
+            }
+
+            sql.append(" WHERE ").append(relation.getExistsCondition(ownerTableName));
+
+            // Apply additional constraints
+            if (Objects.nonNull(constraint)) {
+                SelectBuilder subBuilder = new SelectBuilder(java.util.List.of());
+                subBuilder = constraint.apply(subBuilder);
+                Predicate whereClause = subBuilder.getWhereClause();
+                if (Objects.nonNull(whereClause)) {
+                    sql.append(" AND ").append(whereClause.toSql(dialect));
+                }
+            }
+
+            sql.append(") AS ").append(alias);
+            return sql.toString();
+        }
+    }
+
+    /**
+     * Subquery types for relation aggregates.
+     */
+    enum SubqueryType {
+        COUNT, EXISTS, SUM, MAX, MIN, AVG
+    }
+
+    /**
+     * Factory method for SubqueryItem.
+     */
+    static SelectItem subquery(
+            SubqueryType type,
+            Relation<?, ?> relation,
+            Column<?, ?> column,
+            Function<SelectBuilder, SelectBuilder> constraint,
+            String alias,
+            String ownerTableName
+    ) {
+        return new SubqueryItem(type, relation, column, constraint, alias, ownerTableName);
     }
 }

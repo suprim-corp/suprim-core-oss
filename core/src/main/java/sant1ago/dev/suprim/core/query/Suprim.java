@@ -129,7 +129,7 @@ public final class Suprim {
                     return col.definition();
                 }
                 SqlType sqlType = col.type();
-                if (nonNull(sqlType) && !sqlType.isAuto()) {
+                if (!sqlType.isAuto()) {
                     return buildSqlTypeString(sqlType, col);
                 }
             }
@@ -185,12 +185,21 @@ public final class Suprim {
         SerializedLambda lambda = getSerializedLambda(getter);
         String methodName = lambda.getImplMethodName();
         String fieldName = extractFieldName(methodName);
+        String implClass = lambda.getImplClass();
 
+        Class<?> entityClass = resolveClass(implClass);
+        return column(entityClass, fieldName);
+    }
+
+    /**
+     * Resolves a class from its internal name (with / separators).
+     * Package-private for testing.
+     */
+    static Class<?> resolveClass(String internalClassName) {
         try {
-            Class<?> entityClass = Class.forName(lambda.getImplClass().replace('/', '.'));
-            return column(entityClass, fieldName);
+            return Class.forName(internalClassName.replace('/', '.'));
         } catch (ClassNotFoundException e) {
-            throw new IllegalArgumentException("Could not find class: " + lambda.getImplClass(), e);
+            throw new IllegalArgumentException("Could not find class: " + internalClassName, e);
         }
     }
 

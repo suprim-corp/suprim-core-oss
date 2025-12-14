@@ -1,5 +1,7 @@
 # Suprim OSS
 
+[![codecov](https://codecov.io/gh/suprim-corp/suprim-core-oss/branch/main/graph/badge.svg)](https://codecov.io/gh/suprim-corp/suprim-core-oss)
+
 Open-source type-safe SQL query builder for PostgreSQL, MySQL, and MariaDB.
 
 ## Modules

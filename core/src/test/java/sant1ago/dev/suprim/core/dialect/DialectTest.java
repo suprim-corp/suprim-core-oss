@@ -69,6 +69,8 @@ class DialectTest {
         // Still lacks PostgreSQL-specific features
         assertFalse(caps.supportsIlike());
         assertFalse(caps.supportsArrays());
+        assertFalse(caps.supportsJsonb());
+        assertFalse(caps.supportsFilterClause());
         assertFalse(caps.supportsDistinctOn());
     }
 
@@ -241,6 +243,57 @@ class DialectTest {
         SqlDialect dialect = MySql8Dialect.INSTANCE;
         assertEquals("FOR UPDATE NOWAIT", dialect.forUpdate(true, false));
         assertEquals("FOR UPDATE SKIP LOCKED", dialect.forUpdate(false, true));
+    }
+
+    @Test
+    void testForUpdateWithMariaDb() {
+        SqlDialect dialect = MariaDbDialect.INSTANCE;
+        assertEquals("FOR UPDATE", dialect.forUpdate(false, false));
+        assertEquals("FOR UPDATE NOWAIT", dialect.forUpdate(true, false));
+        assertEquals("FOR UPDATE SKIP LOCKED", dialect.forUpdate(false, true));
+    }
+
+    @Test
+    void testForShareWithPostgreSql() {
+        SqlDialect dialect = PostgreSqlDialect.INSTANCE;
+        assertEquals("FOR SHARE", dialect.forShare(false, false));
+        assertEquals("FOR SHARE NOWAIT", dialect.forShare(true, false));
+        assertEquals("FOR SHARE SKIP LOCKED", dialect.forShare(false, true));
+    }
+
+    @Test
+    void testForShareThrowsForUnsupportedFeatures() {
+        SqlDialect dialect = MySqlDialect.INSTANCE;
+        assertEquals("FOR SHARE", dialect.forShare(false, false));
+
+        // MySQL 5.7 doesn't support NOWAIT
+        UnsupportedDialectFeatureException nowaitEx = assertThrows(
+                UnsupportedDialectFeatureException.class,
+                () -> dialect.forShare(true, false)
+        );
+        assertEquals("NOWAIT", nowaitEx.getFeature());
+
+        // MySQL 5.7 doesn't support SKIP LOCKED
+        UnsupportedDialectFeatureException skipLockedEx = assertThrows(
+                UnsupportedDialectFeatureException.class,
+                () -> dialect.forShare(false, true)
+        );
+        assertEquals("SKIP LOCKED", skipLockedEx.getFeature());
+    }
+
+    @Test
+    void testForShareWithMySql8() {
+        SqlDialect dialect = MySql8Dialect.INSTANCE;
+        assertEquals("FOR SHARE NOWAIT", dialect.forShare(true, false));
+        assertEquals("FOR SHARE SKIP LOCKED", dialect.forShare(false, true));
+    }
+
+    @Test
+    void testForShareWithMariaDb() {
+        SqlDialect dialect = MariaDbDialect.INSTANCE;
+        assertEquals("FOR SHARE", dialect.forShare(false, false));
+        assertEquals("FOR SHARE NOWAIT", dialect.forShare(true, false));
+        assertEquals("FOR SHARE SKIP LOCKED", dialect.forShare(false, true));
     }
 
     // ==================== RETURNING CLAUSE ====================

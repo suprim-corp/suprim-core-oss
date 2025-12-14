@@ -929,10 +929,6 @@ public final class Relation<T, R> {
      * Returns null for non-ofMany relations.
      */
     public String getOfManyOrderBy() {
-        if (!type.isOfMany()) {
-            return null;
-        }
-
         return switch (type) {
             case LATEST_OF_MANY -> relatedTable.getName() + "." + orderColumn + " DESC";
             case OLDEST_OF_MANY -> relatedTable.getName() + "." + orderColumn + " ASC";

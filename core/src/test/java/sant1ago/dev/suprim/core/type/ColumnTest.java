@@ -284,4 +284,57 @@ class ColumnTest {
 
         assertTrue(sql.contains("users.\"age\" IN ()"));
     }
+
+    // ==================== ALIASED COLUMN TESTS ====================
+
+    @Test
+    @DisplayName("AliasedColumn getValueType returns column value type")
+    void testAliasedColumnGetValueType() {
+        AliasedColumn<?, String> aliased = TestUser_.EMAIL.as("user_email");
+        assertEquals(String.class, aliased.getValueType());
+    }
+
+    @Test
+    @DisplayName("AliasedColumn record accessors")
+    void testAliasedColumnRecordAccessors() {
+        AliasedColumn<?, String> aliased = TestUser_.EMAIL.as("user_email");
+        assertSame(TestUser_.EMAIL, aliased.column());
+        assertEquals("user_email", aliased.alias());
+    }
+
+    // ==================== BASE COLUMN METHODS ====================
+
+    @Test
+    @DisplayName("Column.of() static factory method")
+    void testColumnOfStaticFactory() {
+        Column<?, Object> col = Column.of("custom_col", TestUser_.TABLE);
+        assertNotNull(col);
+        assertEquals("custom_col", col.getName());
+    }
+
+    @Test
+    @DisplayName("Column getTable() returns owning table")
+    void testColumnGetTable() {
+        assertSame(TestUser_.TABLE, TestUser_.EMAIL.getTable());
+        assertSame(TestUser_.TABLE, TestUser_.AGE.getTable());
+    }
+
+    @Test
+    @DisplayName("Base Column gt/gte/lt/lte methods")
+    void testBaseColumnComparisonMethods() {
+        // Create a plain Column (not ComparableColumn) to test Column's own methods
+        Column<?, Object> col = Column.of("score", TestUser_.TABLE);
+
+        Predicate gtPred = col.gt(100);
+        assertTrue(gtPred.toSql(PostgreSqlDialect.INSTANCE).contains("> 100"));
+
+        Predicate gtePred = col.gte(50);
+        assertTrue(gtePred.toSql(PostgreSqlDialect.INSTANCE).contains(">= 50"));
+
+        Predicate ltPred = col.lt(200);
+        assertTrue(ltPred.toSql(PostgreSqlDialect.INSTANCE).contains("< 200"));
+
+        Predicate ltePred = col.lte(150);
+        assertTrue(ltePred.toSql(PostgreSqlDialect.INSTANCE).contains("<= 150"));
+    }
 }

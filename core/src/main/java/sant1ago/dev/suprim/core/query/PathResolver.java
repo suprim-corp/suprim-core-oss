@@ -28,6 +28,10 @@ public final class PathResolver {
     // Cache for metamodel class lookups to improve performance
     private static final Map<Class<?>, Class<?>> METAMODEL_CACHE = new ConcurrentHashMap<>();
 
+    private PathResolver() {
+        // Utility class - prevent instantiation
+    }
+
     /**
      * Resolve a dot-notation path to an EagerLoadSpec tree.
      *
@@ -45,9 +49,6 @@ public final class PathResolver {
         }
 
         String[] parts = path.split("\\.");
-        if (parts.length == 0) {
-            throw new IllegalArgumentException("Invalid path: " + path);
-        }
 
         // Build the tree from bottom-up (reverse order)
         EagerLoadSpec current = null;
@@ -86,9 +87,6 @@ public final class PathResolver {
         }
 
         String[] parts = path.split("\\.");
-        if (parts.length == 0) {
-            throw new IllegalArgumentException("Invalid path: " + path);
-        }
 
         // Build tree from bottom-up
         EagerLoadSpec current = null;
@@ -195,24 +193,22 @@ public final class PathResolver {
                 );
             }
 
-            // Try to access as public field first (metamodel fields should be public)
-            try {
-                return (Relation<?, ?>) field.get(null);
-            } catch (IllegalAccessException e) {
-                // Fallback to setAccessible for non-public fields
-                field.setAccessible(true);
-                return (Relation<?, ?>) field.get(null);
-            }
+            // Access the static field value
+            return (Relation<?, ?>) field.get(null);
 
         } catch (IllegalAccessException e) {
             throw new IllegalArgumentException(
                     "Failed to access relation field '" + fieldName + "' on " + entityClass.getSimpleName(), e
             );
-        } catch (ClassNotFoundException e) {
-            throw new IllegalArgumentException(
-                    "Metamodel class not found for entity " + entityClass.getSimpleName() + ". " +
-                            "Ensure annotation processor has been run.", e
-            );
+        } catch (RuntimeException e) {
+            // Handle RuntimeException from computeIfAbsent that wraps ClassNotFoundException
+            if (e.getCause() instanceof ClassNotFoundException) {
+                throw new IllegalArgumentException(
+                        "Metamodel class not found for entity " + entityClass.getSimpleName() + ". " +
+                                "Ensure annotation processor has been run.", e.getCause()
+                );
+            }
+            throw e;
         }
     }
 
@@ -220,7 +216,7 @@ public final class PathResolver {
      * Get the metamodel class for an entity (e.g., User -> User_).
      * Caches results for performance.
      */
-    private static Class<?> getMetamodelClass(Class<?> entityClass) throws ClassNotFoundException {
+    private static Class<?> getMetamodelClass(Class<?> entityClass) {
         return METAMODEL_CACHE.computeIfAbsent(entityClass, key -> {
             String metamodelName = key.getName() + "_";
             try {
@@ -250,15 +246,6 @@ public final class PathResolver {
      * - "user_roles" -> "USER_ROLES"
      */
     private static String toConstantCase(String fieldName) {
-        if (Objects.isNull(fieldName) || fieldName.isEmpty()) {
-            return fieldName;
-        }
-
-        // If already CONSTANT_CASE, return as-is
-        if (fieldName.equals(fieldName.toUpperCase()) && fieldName.contains("_")) {
-            return fieldName;
-        }
-
         // Convert camelCase to snake_case, then uppercase
         String snakeCase = fieldName
                 .replaceAll("([a-z])([A-Z])", "$1_$2")  // camelCase -> camel_Case

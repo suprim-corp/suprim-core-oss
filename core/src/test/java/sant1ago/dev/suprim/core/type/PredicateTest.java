@@ -2,8 +2,13 @@ package sant1ago.dev.suprim.core.type;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import sant1ago.dev.suprim.annotation.entity.Entity;
 import sant1ago.dev.suprim.core.TestUser_;
+import sant1ago.dev.suprim.core.dialect.MySqlDialect;
 import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
+import sant1ago.dev.suprim.core.dialect.UnsupportedDialectFeatureException;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -322,5 +327,98 @@ class PredicateTest {
         // Check that parentheses are present for grouping
         assertTrue(sql.contains("("));
         assertTrue(sql.contains(")"));
+    }
+
+    // ==================== SimplePredicate Branch Coverage Tests ====================
+
+    @Test
+    @DisplayName("IN with null right expression")
+    void testInWithNullRight() {
+        Predicate predicate = new Predicate.SimplePredicate(
+                TestUser_.AGE, Operator.IN, null
+        );
+        String sql = predicate.toSql(PostgreSqlDialect.INSTANCE);
+        assertTrue(sql.contains("IN ()"));
+    }
+
+    @Test
+    @DisplayName("BETWEEN with wrong size ListLiteral")
+    void testBetweenWithWrongSizeList() {
+        // Single value list - should fallback to "BETWEEN ?"
+        Predicate predicate = new Predicate.SimplePredicate(
+                TestUser_.AGE, Operator.BETWEEN, new ListLiteral<>(List.of(10), Integer.class)
+        );
+        String sql = predicate.toSql(PostgreSqlDialect.INSTANCE);
+        assertTrue(sql.contains("BETWEEN ?"));
+    }
+
+    @Test
+    @DisplayName("BETWEEN with non-ListLiteral right")
+    void testBetweenWithNonListLiteral() {
+        Predicate predicate = new Predicate.SimplePredicate(
+                TestUser_.AGE, Operator.BETWEEN, new Literal<>(50, Integer.class)
+        );
+        String sql = predicate.toSql(PostgreSqlDialect.INSTANCE);
+        assertTrue(sql.contains("BETWEEN ?"));
+    }
+
+    @Test
+    @DisplayName("ILIKE with null right - PostgreSQL")
+    void testIlikeWithNullRightPostgres() {
+        Predicate predicate = new Predicate.SimplePredicate(
+                TestUser_.NAME, Operator.ILIKE, null
+        );
+        String sql = predicate.toSql(PostgreSqlDialect.INSTANCE);
+        assertTrue(sql.contains("ILIKE NULL"));
+    }
+
+    @Test
+    @DisplayName("ILIKE with null right - MySQL")
+    void testIlikeWithNullRightMysql() {
+        Predicate predicate = new Predicate.SimplePredicate(
+                TestUser_.NAME, Operator.ILIKE, null
+        );
+        String sql = predicate.toSql(MySqlDialect.INSTANCE);
+        assertTrue(sql.contains("LOWER") && sql.contains("NULL"));
+    }
+
+    @Test
+    @DisplayName("Array operator with MySQL throws exception")
+    void testArrayOperatorWithMysqlThrows() {
+        @Entity(table = "test")
+        class TestEntity {}
+        Table<TestEntity> table = Table.of("test", TestEntity.class);
+        ArrayColumn<TestEntity, String> tags = new ArrayColumn<>(table, "tags", String.class, "TEXT[]");
+
+        Predicate predicate = new Predicate.SimplePredicate(
+                tags, Operator.ARRAY_CONTAINS, new ArrayColumn.ArrayLiteral<>(List.of("a"), String.class)
+        );
+        assertThrows(UnsupportedDialectFeatureException.class,
+                () -> predicate.toSql(MySqlDialect.INSTANCE));
+    }
+
+    @Test
+    @DisplayName("Array operator with null right - PostgreSQL")
+    void testArrayOperatorWithNullRight() {
+        @Entity(table = "test")
+        class TestEntity {}
+        Table<TestEntity> table = Table.of("test", TestEntity.class);
+        ArrayColumn<TestEntity, String> tags = new ArrayColumn<>(table, "tags", String.class, "TEXT[]");
+
+        Predicate predicate = new Predicate.SimplePredicate(
+                tags, Operator.ARRAY_CONTAINS, null
+        );
+        String sql = predicate.toSql(PostgreSqlDialect.INSTANCE);
+        assertTrue(sql.contains("@> NULL"));
+    }
+
+    @Test
+    @DisplayName("Default case with null right")
+    void testDefaultCaseWithNullRight() {
+        Predicate predicate = new Predicate.SimplePredicate(
+                TestUser_.AGE, Operator.EQUALS, null
+        );
+        String sql = predicate.toSql(PostgreSqlDialect.INSTANCE);
+        assertTrue(sql.contains("= NULL"));
     }
 }

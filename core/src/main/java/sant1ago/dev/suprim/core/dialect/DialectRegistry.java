@@ -79,7 +79,7 @@ public final class DialectRegistry {
      */
     public static Optional<SqlDialect> forName(String name) {
         SqlDialect dialect = DIALECTS.get(name.toLowerCase());
-        if (dialect == null) {
+        if (Objects.isNull(dialect)) {
             return Optional.empty();
         }
         return checkLicenseAndReturn(dialect, name);
