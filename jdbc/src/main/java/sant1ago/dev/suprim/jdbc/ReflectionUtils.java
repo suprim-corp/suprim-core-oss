@@ -4,6 +4,7 @@ import sant1ago.dev.suprim.casey.Casey;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.RecordComponent;
@@ -384,7 +385,30 @@ public final class ReflectionUtils {
             logPrivateAccessWarning(clazz, fieldName, "setter");
 
             field.setAccessible(true);
-            return getPrivateLookup(clazz).unreflectSetter(field);
+
+            // Try MethodHandle first
+            try {
+                return getPrivateLookup(clazz).unreflectSetter(field);
+            } catch (IllegalAccessException e) {
+                // Fallback: wrap Field.set() for cross-module access in Java 9+
+                return createFieldSetter(field);
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Create a MethodHandle wrapper around Field.set() for cross-module access.
+     * Works across module boundaries where unreflectSetter() fails.
+     */
+    private static MethodHandle createFieldSetter(Field field) {
+        try {
+            MethodHandle setter = MethodHandles.lookup().findVirtual(
+                Field.class, "set",
+                MethodType.methodType(void.class, Object.class, Object.class)
+            );
+            return setter.bindTo(field);
         } catch (Exception e) {
             return null;
         }
