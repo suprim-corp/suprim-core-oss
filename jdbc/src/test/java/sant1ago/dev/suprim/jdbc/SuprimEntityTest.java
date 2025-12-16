@@ -1,6 +1,9 @@
 package sant1ago.dev.suprim.jdbc;
 
+import org.h2.jdbcx.JdbcDataSource;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -9,6 +12,8 @@ import sant1ago.dev.suprim.annotation.entity.Entity;
 import sant1ago.dev.suprim.annotation.entity.Id;
 import sant1ago.dev.suprim.annotation.type.GenerationType;
 
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -19,6 +24,35 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("SuprimEntity Tests")
 class SuprimEntityTest {
 
+    private static JdbcDataSource dataSource;
+    private static SuprimExecutor executor;
+
+    @BeforeAll
+    static void setup() throws SQLException {
+        dataSource = new JdbcDataSource();
+        dataSource.setURL("jdbc:h2:mem:entity_test;DB_CLOSE_DELAY=-1");
+        dataSource.setUser("sa");
+        dataSource.setPassword("");
+
+        executor = SuprimExecutor.create(dataSource);
+
+        // Create test table (quoted to preserve lowercase for H2)
+        try (Connection conn = dataSource.getConnection()) {
+            conn.createStatement().execute(
+                "CREATE TABLE IF NOT EXISTS \"entity_users\" (" +
+                "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                "\"email\" VARCHAR(255))"
+            );
+        }
+    }
+
+    @AfterAll
+    static void teardown() throws SQLException {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.createStatement().execute("DROP TABLE IF EXISTS \"entity_users\"");
+        }
+    }
+
     @AfterEach
     void cleanup() {
         SuprimContext.clearContext();
@@ -26,17 +60,17 @@ class SuprimEntityTest {
 
     // ==================== TEST ENTITY ====================
 
-    @Entity(table = "test_users")
+    @Entity(table = "entity_users")
     static class TestUser extends SuprimEntity {
         @Id(strategy = GenerationType.UUID_V7)
         @Column(name = "id")
-        private UUID id;
+        private String id;
 
         @Column(name = "email")
         private String email;
 
-        public UUID getId() { return id; }
-        public void setId(UUID id) { this.id = id; }
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
         public String getEmail() { return email; }
         public void setEmail(String email) { this.email = email; }
     }
@@ -64,22 +98,34 @@ class SuprimEntityTest {
     }
 
     @Nested
-    @DisplayName("save() return value")
-    class SaveReturnValueTests {
+    @DisplayName("save() within transaction")
+    class SaveWithinTransactionTests {
+
+        @Test
+        @DisplayName("saves entity and generates ID")
+        void save_withinTransaction_savesEntity() {
+            TestUser user = new TestUser();
+            user.setEmail("active-record@example.com");
+
+            executor.transaction(tx -> {
+                user.save();
+            });
+
+            // Verify ID was generated
+            assertNotNull(user.getId());
+            assertFalse(user.getId().isEmpty());
+        }
 
         @Test
         @DisplayName("returns same entity instance")
-        void save_returnsThis() {
-            // Note: This test verifies the return type without actual DB
-            // Full integration test would use real transaction
-
-            // The save() method returns 'this' after EntityPersistence.save()
-            // We can't test the full flow without DB, but we verify the contract
+        void save_withinTransaction_returnsSameInstance() {
             TestUser user = new TestUser();
+            user.setEmail("return-test@example.com");
 
-            // save() should return SuprimEntity (same instance)
-            // This is verified by the return type of the method
-            assertNotNull(user);
+            executor.transaction(tx -> {
+                SuprimEntity returned = user.save();
+                assertSame(user, returned);
+            });
         }
     }
 
