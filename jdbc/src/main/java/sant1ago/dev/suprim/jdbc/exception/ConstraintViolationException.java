@@ -73,17 +73,35 @@ public class ConstraintViolationException extends ExecutionException {
     private static ConstraintViolationException parseFromMessage(String sql, String message, SQLException cause) {
         String lowerMessage = message.toLowerCase();
 
-        if (lowerMessage.contains("unique") || lowerMessage.contains("duplicate")
-                || lowerMessage.contains("primary key")) {
+        // Unique constraint patterns - check each separately
+        if (lowerMessage.contains("unique")) {
             return UniqueConstraintException.fromSQLException(sql, cause);
         }
-        if (lowerMessage.contains("foreign key") || lowerMessage.contains("referential")) {
+        if (lowerMessage.contains("duplicate")) {
+            return UniqueConstraintException.fromSQLException(sql, cause);
+        }
+        if (lowerMessage.contains("primary key")) {
+            return UniqueConstraintException.fromSQLException(sql, cause);
+        }
+
+        // Foreign key patterns
+        if (lowerMessage.contains("foreign key")) {
             return ForeignKeyException.fromSQLException(sql, cause);
         }
+        if (lowerMessage.contains("referential")) {
+            return ForeignKeyException.fromSQLException(sql, cause);
+        }
+
+        // Check constraint
         if (lowerMessage.contains("check constraint")) {
             return CheckConstraintException.fromSQLException(sql, cause);
         }
-        if (lowerMessage.contains("not null") || lowerMessage.contains("cannot be null")) {
+
+        // Not null patterns
+        if (lowerMessage.contains("not null")) {
+            return NotNullException.fromSQLException(sql, cause);
+        }
+        if (lowerMessage.contains("cannot be null")) {
             return NotNullException.fromSQLException(sql, cause);
         }
 

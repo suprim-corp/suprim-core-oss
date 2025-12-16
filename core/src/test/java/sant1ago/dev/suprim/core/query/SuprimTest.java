@@ -726,4 +726,58 @@ class SuprimTest {
             assertEquals("", result);
         }
     }
+
+    // ==================== BULK SOFT DELETE / RESTORE ====================
+
+    @Nested
+    @DisplayName("Bulk Soft Delete / Restore")
+    class BulkSoftDeleteTests {
+
+        @Test
+        @DisplayName("softDelete creates UPDATE with NOW()")
+        void testSoftDeleteCreatesUpdate() {
+            QueryResult result = Suprim.softDelete(TestUser_.TABLE, "deleted_at")
+                .where(TestUser_.IS_ACTIVE.eq(false))
+                .build();
+
+            String sql = result.sql();
+            assertTrue(sql.startsWith("UPDATE"));
+            assertTrue(sql.contains("SET \"deleted_at\" = NOW()"));
+            assertTrue(sql.contains("WHERE"));
+        }
+
+        @Test
+        @DisplayName("restore creates UPDATE with NULL")
+        void testRestoreCreatesUpdate() {
+            QueryResult result = Suprim.restore(TestUser_.TABLE, "deleted_at")
+                .whereRaw("deleted_at IS NOT NULL")
+                .build();
+
+            String sql = result.sql();
+            assertTrue(sql.startsWith("UPDATE"));
+            assertTrue(sql.contains("SET \"deleted_at\" = NULL"));
+            assertTrue(sql.contains("WHERE deleted_at IS NOT NULL"));
+        }
+
+        @Test
+        @DisplayName("softDelete with custom column name")
+        void testSoftDeleteCustomColumn() {
+            QueryResult result = Suprim.softDelete(TestUser_.TABLE, "removed_at")
+                .where(TestUser_.ID.eq(1L))
+                .build();
+
+            assertTrue(result.sql().contains("SET \"removed_at\" = NOW()"));
+        }
+
+        @Test
+        @DisplayName("restore can chain with additional conditions")
+        void testRestoreWithChainedConditions() {
+            QueryResult result = Suprim.restore(TestUser_.TABLE, "deleted_at")
+                .whereRaw("deleted_at > '2024-01-01'")
+                .build();
+
+            assertTrue(result.sql().contains("SET \"deleted_at\" = NULL"));
+            assertTrue(result.sql().contains("WHERE deleted_at > '2024-01-01'"));
+        }
+    }
 }

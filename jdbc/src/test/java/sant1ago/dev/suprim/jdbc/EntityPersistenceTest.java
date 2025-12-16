@@ -2277,4 +2277,298 @@ class EntityPersistenceTest {
             assertEquals(0, fields.length, "Should return empty array for Object.class input");
         }
     }
+
+    // ==================== TIMESTAMP CONVERSION TESTS ====================
+
+    @Nested
+    @DisplayName("Timestamp Conversion")
+    class TimestampConversionTests {
+
+        @Test
+        @DisplayName("convertTimestampToFieldType returns null for null input")
+        void testConvertTimestampNull() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            Object result = method.invoke(null, null, java.time.LocalDateTime.class);
+            assertNull(result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType returns value when already correct type")
+        void testConvertTimestampSameType() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.Instant instant = java.time.Instant.now();
+            Object result = method.invoke(null, instant, java.time.Instant.class);
+            assertEquals(instant, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts Instant to LocalDateTime")
+        void testConvertInstantToLocalDateTime() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.Instant instant = java.time.Instant.now();
+            Object result = method.invoke(null, instant, java.time.LocalDateTime.class);
+
+            assertInstanceOf(java.time.LocalDateTime.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts Instant to OffsetDateTime")
+        void testConvertInstantToOffsetDateTime() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.Instant instant = java.time.Instant.now();
+            Object result = method.invoke(null, instant, java.time.OffsetDateTime.class);
+
+            assertInstanceOf(java.time.OffsetDateTime.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts Instant to Timestamp")
+        void testConvertInstantToTimestamp() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.Instant instant = java.time.Instant.now();
+            Object result = method.invoke(null, instant, java.sql.Timestamp.class);
+
+            assertInstanceOf(java.sql.Timestamp.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts Timestamp to LocalDateTime")
+        void testConvertTimestampToLocalDateTime() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.sql.Timestamp timestamp = java.sql.Timestamp.from(java.time.Instant.now());
+            Object result = method.invoke(null, timestamp, java.time.LocalDateTime.class);
+
+            assertInstanceOf(java.time.LocalDateTime.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts Timestamp to Instant")
+        void testConvertTimestampToInstant() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.sql.Timestamp timestamp = java.sql.Timestamp.from(java.time.Instant.now());
+            Object result = method.invoke(null, timestamp, java.time.Instant.class);
+
+            assertInstanceOf(java.time.Instant.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts LocalDateTime to Instant")
+        void testConvertLocalDateTimeToInstant() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.LocalDateTime ldt = java.time.LocalDateTime.now();
+            Object result = method.invoke(null, ldt, java.time.Instant.class);
+
+            assertInstanceOf(java.time.Instant.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts to java.util.Date")
+        void testConvertToUtilDate() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.Instant instant = java.time.Instant.now();
+            Object result = method.invoke(null, instant, java.util.Date.class);
+
+            assertInstanceOf(java.util.Date.class, result);
+        }
+
+        @Test
+        @DisplayName("isTemporalType returns true for temporal types")
+        void testIsTemporalType() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "isTemporalType", Class.class);
+            method.setAccessible(true);
+
+            assertTrue((Boolean) method.invoke(null, java.time.LocalDateTime.class));
+            assertTrue((Boolean) method.invoke(null, java.time.Instant.class));
+            assertTrue((Boolean) method.invoke(null, java.time.OffsetDateTime.class));
+            assertTrue((Boolean) method.invoke(null, java.sql.Timestamp.class));
+            assertTrue((Boolean) method.invoke(null, java.util.Date.class));
+        }
+
+        @Test
+        @DisplayName("isTemporalType returns false for non-temporal types")
+        void testIsNotTemporalType() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "isTemporalType", Class.class);
+            method.setAccessible(true);
+
+            assertFalse((Boolean) method.invoke(null, String.class));
+            assertFalse((Boolean) method.invoke(null, Long.class));
+            assertFalse((Boolean) method.invoke(null, Integer.class));
+            assertFalse((Boolean) method.invoke(null, java.util.UUID.class));
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts OffsetDateTime to Instant")
+        void testConvertOffsetDateTimeToInstant() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.OffsetDateTime odt = java.time.OffsetDateTime.now();
+            Object result = method.invoke(null, odt, java.time.Instant.class);
+
+            assertInstanceOf(java.time.Instant.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts OffsetDateTime to LocalDateTime")
+        void testConvertOffsetDateTimeToLocalDateTime() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.OffsetDateTime odt = java.time.OffsetDateTime.now();
+            Object result = method.invoke(null, odt, java.time.LocalDateTime.class);
+
+            assertInstanceOf(java.time.LocalDateTime.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts OffsetDateTime to Timestamp")
+        void testConvertOffsetDateTimeToTimestamp() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.OffsetDateTime odt = java.time.OffsetDateTime.now();
+            Object result = method.invoke(null, odt, java.sql.Timestamp.class);
+
+            assertInstanceOf(java.sql.Timestamp.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts OffsetDateTime to java.util.Date")
+        void testConvertOffsetDateTimeToDate() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.OffsetDateTime odt = java.time.OffsetDateTime.now();
+            Object result = method.invoke(null, odt, java.util.Date.class);
+
+            assertInstanceOf(java.util.Date.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType returns unknown type as-is")
+        void testConvertUnknownTypeReturnsAsIs() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            // Unknown source type should be returned as-is
+            String unknownValue = "not a timestamp";
+            Object result = method.invoke(null, unknownValue, java.time.Instant.class);
+
+            assertEquals(unknownValue, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType returns instant fallback for unknown target type")
+        void testConvertFallbackReturnsInstant() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            // When target type is not a known temporal type, return the instant
+            java.time.Instant instant = java.time.Instant.now();
+            Object result = method.invoke(null, instant, Object.class);
+
+            // Should return the instant since Object.class is not a known target type
+            assertInstanceOf(java.time.Instant.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts Timestamp to OffsetDateTime")
+        void testConvertTimestampToOffsetDateTime() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.sql.Timestamp ts = java.sql.Timestamp.from(java.time.Instant.now());
+            Object result = method.invoke(null, ts, java.time.OffsetDateTime.class);
+
+            assertInstanceOf(java.time.OffsetDateTime.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts Timestamp to java.util.Date")
+        void testConvertTimestampToUtilDate() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.sql.Timestamp ts = java.sql.Timestamp.from(java.time.Instant.now());
+            Object result = method.invoke(null, ts, java.util.Date.class);
+
+            assertInstanceOf(java.util.Date.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts LocalDateTime to OffsetDateTime")
+        void testConvertLocalDateTimeToOffsetDateTime() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.LocalDateTime ldt = java.time.LocalDateTime.now();
+            Object result = method.invoke(null, ldt, java.time.OffsetDateTime.class);
+
+            assertInstanceOf(java.time.OffsetDateTime.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts LocalDateTime to Timestamp")
+        void testConvertLocalDateTimeToTimestamp() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.LocalDateTime ldt = java.time.LocalDateTime.now();
+            Object result = method.invoke(null, ldt, java.sql.Timestamp.class);
+
+            assertInstanceOf(java.sql.Timestamp.class, result);
+        }
+
+        @Test
+        @DisplayName("convertTimestampToFieldType converts LocalDateTime to java.util.Date")
+        void testConvertLocalDateTimeToUtilDate() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertTimestampToFieldType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            java.time.LocalDateTime ldt = java.time.LocalDateTime.now();
+            Object result = method.invoke(null, ldt, java.util.Date.class);
+
+            assertInstanceOf(java.util.Date.class, result);
+        }
+    }
 }

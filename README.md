@@ -229,6 +229,100 @@ executor.transaction(tx -> {
 | `delete()`  | DELETE entity by ID                  |
 | `refresh()` | Reload entity values from DB         |
 
+### Soft Delete
+
+Soft delete marks records as deleted without removing them from the database.
+
+#### Setup
+
+Add `@SoftDeletes` annotation and a timestamp column:
+
+```java
+@Entity(table = "users")
+@SoftDeletes  // Uses "deleted_at" column by default
+public class User extends SuprimEntity {
+    @Id(strategy = GenerationType.UUID_V7)
+    @Column(name = "id")
+    private UUID id;
+
+    @Column(name = "email")
+    private String email;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;  // Or Instant, OffsetDateTime, Timestamp
+
+    // getters/setters
+}
+```
+
+Custom column name:
+
+```java
+@SoftDeletes(column = "removed_at")
+```
+
+#### Active Record Methods
+
+```java
+// Soft delete - sets deleted_at to NOW()
+user.softDelete();
+
+// Check if soft-deleted
+if (user.isTrashed()) {
+    // Restore - sets deleted_at to NULL
+    user.restore();
+}
+
+// Permanent delete - removes from database
+user.forceDelete();
+```
+
+#### Query Scopes
+
+Soft-deleted records are **automatically excluded** from queries:
+
+```java
+// Default: only non-deleted records (WHERE deleted_at IS NULL)
+Suprim.select(User_.ID, User_.EMAIL)
+    .from(User_.TABLE)
+    .build();
+
+// Include soft-deleted records (no filter)
+Suprim.select(User_.ID, User_.EMAIL)
+    .from(User_.TABLE)
+    .withTrashed()
+    .build();
+
+// Only soft-deleted records (WHERE deleted_at IS NOT NULL)
+Suprim.select(User_.ID, User_.EMAIL)
+    .from(User_.TABLE)
+    .onlyTrashed()
+    .build();
+```
+
+#### Bulk Operations
+
+```java
+// Soft delete multiple records
+Suprim.softDelete(User_.TABLE, "deleted_at")
+    .where(User_.IS_ACTIVE.eq(false))
+    .build();
+
+// Restore multiple records
+Suprim.restore(User_.TABLE, "deleted_at")
+    .whereRaw("deleted_at > NOW() - INTERVAL '30 days'")
+    .build();
+```
+
+| Method | Description |
+|--------|-------------|
+| `softDelete()` | Set deleted_at to current timestamp |
+| `restore()` | Set deleted_at to NULL |
+| `forceDelete()` | Permanently delete from database |
+| `isTrashed()` | Check if record is soft-deleted |
+| `withTrashed()` | Include soft-deleted in query |
+| `onlyTrashed()` | Query only soft-deleted records |
+
 ## License
 
 Suprim is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).

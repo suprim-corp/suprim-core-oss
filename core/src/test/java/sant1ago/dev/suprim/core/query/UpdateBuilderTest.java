@@ -261,4 +261,71 @@ class UpdateBuilderTest {
         assertFalse(sql.contains("CAST("), "MySQL should not wrap with CAST: " + sql);
         assertTrue(sql.contains(":p1"), "MySQL should use plain param: " + sql);
     }
+
+    // ==================== RAW COLUMN METHODS ====================
+
+    @Test
+    @DisplayName("setRaw sets column to expression value")
+    void testSetRawWithExpression() {
+        QueryResult result = Suprim.update(TestUser_.TABLE)
+            .setRaw("updated_at", sant1ago.dev.suprim.core.type.Fn.now())
+            .where(TestUser_.ID.eq(1L))
+            .build();
+
+        String sql = result.sql();
+        assertTrue(sql.contains("SET \"updated_at\" = NOW()"));
+        assertTrue(sql.contains("WHERE"));
+    }
+
+    @Test
+    @DisplayName("setNull sets column to NULL literal")
+    void testSetNullSetsNull() {
+        QueryResult result = Suprim.update(TestUser_.TABLE)
+            .setNull("deleted_at")
+            .where(TestUser_.ID.eq(1L))
+            .build();
+
+        String sql = result.sql();
+        assertTrue(sql.contains("SET \"deleted_at\" = NULL"));
+    }
+
+    @Test
+    @DisplayName("whereRaw adds raw SQL WHERE condition")
+    void testWhereRawAddsRawCondition() {
+        QueryResult result = Suprim.update(TestUser_.TABLE)
+            .setNull("deleted_at")
+            .whereRaw("deleted_at IS NOT NULL")
+            .build();
+
+        String sql = result.sql();
+        assertTrue(sql.contains("WHERE deleted_at IS NOT NULL"));
+    }
+
+    @Test
+    @DisplayName("setRaw and setNull combined")
+    void testSetRawAndSetNullCombined() {
+        QueryResult result = Suprim.update(TestUser_.TABLE)
+            .setRaw("updated_at", sant1ago.dev.suprim.core.type.Fn.now())
+            .setNull("deleted_at")
+            .set(TestUser_.NAME, "Updated")
+            .where(TestUser_.ID.eq(1L))
+            .build();
+
+        String sql = result.sql();
+        assertTrue(sql.contains("\"updated_at\" = NOW()"));
+        assertTrue(sql.contains("\"deleted_at\" = NULL"));
+        assertTrue(sql.contains("\"name\" = :"));
+    }
+
+    @Test
+    @DisplayName("setRaw with custom column name in MySQL dialect")
+    void testSetRawMySqlDialect() {
+        QueryResult result = Suprim.update(TestUser_.TABLE)
+            .setRaw("updated_at", sant1ago.dev.suprim.core.type.Fn.now())
+            .where(TestUser_.ID.eq(1L))
+            .build(MySqlDialect.INSTANCE);
+
+        String sql = result.sql();
+        assertTrue(sql.contains("SET `updated_at` = NOW()"));
+    }
 }

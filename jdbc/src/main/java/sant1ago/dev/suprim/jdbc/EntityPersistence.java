@@ -2,6 +2,7 @@ package sant1ago.dev.suprim.jdbc;
 
 import sant1ago.dev.suprim.annotation.entity.Column;
 import sant1ago.dev.suprim.annotation.entity.JsonbColumn;
+import sant1ago.dev.suprim.annotation.entity.SoftDeletes;
 import sant1ago.dev.suprim.annotation.type.GenerationType;
 import sant1ago.dev.suprim.annotation.type.IdGenerator;
 import sant1ago.dev.suprim.annotation.type.SqlType;
@@ -18,6 +19,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,6 +49,17 @@ import java.util.concurrent.ConcurrentHashMap;
 final class EntityPersistence {
 
     private static final Map<Class<? extends IdGenerator<?>>, IdGenerator<?>> GENERATOR_CACHE = new ConcurrentHashMap<>();
+    private static final Map<Class<?>, SoftDeleteMeta> SOFT_DELETE_CACHE = new ConcurrentHashMap<>();
+
+    /**
+     * Soft delete metadata for an entity class.
+     *
+     * @param enabled true if entity has @SoftDeletes
+     * @param columnName the deleted_at column name
+     */
+    record SoftDeleteMeta(boolean enabled, String columnName) {
+        static final SoftDeleteMeta DISABLED = new SoftDeleteMeta(false, null);
+    }
 
     private EntityPersistence() {
         // Utility class
@@ -473,6 +488,14 @@ final class EntityPersistence {
             );
         }
 
+        // Check for soft deletes
+        SoftDeleteMeta softDeleteMeta = getSoftDeleteMeta(entityClass);
+        if (softDeleteMeta.enabled()) {
+            softDelete(entity, connection, dialect);
+            return;
+        }
+
+        // Hard delete
         String tableName = Objects.nonNull(entityMeta.schema())
             ? dialect.quoteIdentifier(entityMeta.schema()) + "." + dialect.quoteIdentifier(entityMeta.tableName())
             : dialect.quoteIdentifier(entityMeta.tableName());
@@ -598,13 +621,33 @@ final class EntityPersistence {
             try {
                 Object value = rs.getObject(columnName);
                 if (Objects.nonNull(value)) {
-                    value = convertValueToFieldType(value, field.getType());
+                    // Convert temporal types (Timestamp -> LocalDateTime/Instant/etc.)
+                    if (isTemporalType(field.getType())) {
+                        value = convertTimestampToFieldType(value, field.getType());
+                    } else {
+                        value = convertValueToFieldType(value, field.getType());
+                    }
                     ReflectionUtils.setFieldValue(entity, field.getName(), value);
+                } else if (isTemporalType(field.getType())) {
+                    // For temporal fields (like deleted_at), set null to ensure refresh clears them
+                    ReflectionUtils.setFieldValue(entity, field.getName(), null);
                 }
+                // For non-temporal fields with null DB values, preserve in-memory state
             } catch (SQLException e) {
                 // Column might not exist in result set, skip
             }
         }
+    }
+
+    /**
+     * Check if a type is a temporal type that needs timestamp conversion.
+     */
+    private static boolean isTemporalType(Class<?> type) {
+        return type == LocalDateTime.class
+                || type == Instant.class
+                || type == java.time.OffsetDateTime.class
+                || type == Timestamp.class
+                || type == java.util.Date.class;
     }
 
     /**
@@ -649,5 +692,284 @@ final class EntityPersistence {
             current = current.getSuperclass();
         }
         return fields.toArray(new Field[0]);
+    }
+
+    // ==================== Soft Delete Support ====================
+
+    /**
+     * Get soft delete metadata for an entity class.
+     *
+     * @param entityClass the entity class
+     * @return soft delete metadata
+     */
+    static SoftDeleteMeta getSoftDeleteMeta(Class<?> entityClass) {
+        return SOFT_DELETE_CACHE.computeIfAbsent(entityClass, clazz -> {
+            SoftDeletes annotation = clazz.getAnnotation(SoftDeletes.class);
+            if (Objects.isNull(annotation)) {
+                return SoftDeleteMeta.DISABLED;
+            }
+            return new SoftDeleteMeta(true, annotation.column());
+        });
+    }
+
+    /**
+     * Check if an entity is soft deleted (has deleted_at set).
+     *
+     * @param entity the entity to check
+     * @return true if soft deleted
+     */
+    static boolean isTrashed(Object entity) {
+        Class<?> entityClass = entity.getClass();
+        SoftDeleteMeta softDeleteMeta = getSoftDeleteMeta(entityClass);
+
+        if (!softDeleteMeta.enabled()) {
+            return false;
+        }
+
+        // Find the deleted_at field
+        Object deletedAt = getDeletedAtValue(entity, softDeleteMeta.columnName());
+        return Objects.nonNull(deletedAt);
+    }
+
+    /**
+     * Get the deleted_at field value from an entity.
+     */
+    private static Object getDeletedAtValue(Object entity, String columnName) {
+        Class<?> entityClass = entity.getClass();
+        for (Field field : getAllFields(entityClass)) {
+            Column column = field.getAnnotation(Column.class);
+            if (Objects.nonNull(column)) {
+                String colName = column.name().isEmpty()
+                    ? Casey.toSnakeCase(field.getName())
+                    : column.name();
+                if (colName.equals(columnName)) {
+                    return ReflectionUtils.getFieldValue(entity, field.getName());
+                }
+            }
+            // Also check if field name matches (for deletedAt -> deleted_at)
+            if (Casey.toSnakeCase(field.getName()).equals(columnName)) {
+                return ReflectionUtils.getFieldValue(entity, field.getName());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Set the deleted_at field value on an entity.
+     * Converts the value to the appropriate type based on the field's declared type.
+     */
+    private static void setDeletedAtValue(Object entity, String columnName, Object value) {
+        Class<?> entityClass = entity.getClass();
+        for (Field field : getAllFields(entityClass)) {
+            Column column = field.getAnnotation(Column.class);
+            String colName = null;
+            if (Objects.nonNull(column)) {
+                colName = column.name().isEmpty()
+                    ? Casey.toSnakeCase(field.getName())
+                    : column.name();
+            }
+
+            // Check if field matches by column name or field name
+            boolean matches = (Objects.nonNull(colName) && colName.equals(columnName))
+                    || Casey.toSnakeCase(field.getName()).equals(columnName);
+
+            if (matches) {
+                Object convertedValue = convertTimestampToFieldType(value, field.getType());
+                ReflectionUtils.setFieldValue(entity, field.getName(), convertedValue);
+                return;
+            }
+        }
+    }
+
+    /**
+     * Convert a timestamp value to the field's declared type.
+     * Supports LocalDateTime, Instant, OffsetDateTime, java.sql.Timestamp.
+     *
+     * @param value the timestamp value (Instant from current time)
+     * @param targetType the field's declared type
+     * @return converted value or null if input is null
+     */
+    private static Object convertTimestampToFieldType(Object value, Class<?> targetType) {
+        if (Objects.isNull(value)) {
+            return null;
+        }
+
+        // If value is already the target type, return as-is
+        if (targetType.isInstance(value)) {
+            return value;
+        }
+
+        // Convert from Instant (our canonical source)
+        Instant instant;
+        if (value instanceof Instant i) {
+            instant = i;
+        } else if (value instanceof Timestamp ts) {
+            instant = ts.toInstant();
+        } else if (value instanceof LocalDateTime ldt) {
+            instant = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant();
+        } else if (value instanceof java.time.OffsetDateTime odt) {
+            instant = odt.toInstant();
+        } else {
+            // Unknown type, return as-is
+            return value;
+        }
+
+        // Convert to target type
+        if (targetType == LocalDateTime.class) {
+            return LocalDateTime.ofInstant(instant, java.time.ZoneId.systemDefault());
+        } else if (targetType == Instant.class) {
+            return instant;
+        } else if (targetType == java.time.OffsetDateTime.class) {
+            return java.time.OffsetDateTime.ofInstant(instant, java.time.ZoneId.systemDefault());
+        } else if (targetType == Timestamp.class) {
+            return Timestamp.from(instant);
+        } else if (targetType == java.util.Date.class) {
+            return java.util.Date.from(instant);
+        }
+
+        // Fallback - return the instant
+        return instant;
+    }
+
+    /**
+     * Soft delete an entity (set deleted_at to current timestamp).
+     * Only used internally - called from delete() when @SoftDeletes is present.
+     *
+     * @param entity the entity to soft delete
+     * @param connection the database connection
+     * @param dialect the SQL dialect
+     */
+    private static void softDelete(Object entity, Connection connection, SqlDialect dialect) {
+        Class<?> entityClass = entity.getClass();
+        EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(entityClass);
+        EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(entityClass);
+        SoftDeleteMeta softDeleteMeta = getSoftDeleteMeta(entityClass);
+
+        Object id = EntityReflector.getIdOrNull(entity);
+
+        String tableName = Objects.nonNull(entityMeta.schema())
+            ? dialect.quoteIdentifier(entityMeta.schema()) + "." + dialect.quoteIdentifier(entityMeta.tableName())
+            : dialect.quoteIdentifier(entityMeta.tableName());
+
+        // Use database-appropriate current timestamp
+        String sql = "UPDATE " + tableName +
+            " SET " + dialect.quoteIdentifier(softDeleteMeta.columnName()) + " = ?" +
+            " WHERE " + dialect.quoteIdentifier(idMeta.columnName()) + " = ?";
+
+        Instant now = Instant.now();
+        Timestamp timestamp = Timestamp.from(now);
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setTimestamp(1, timestamp);
+            ps.setObject(2, convertIdForQuery(id, idMeta));
+            ps.executeUpdate();
+
+            // Update the entity's deleted_at field (auto-converts to field's type)
+            setDeletedAtValue(entity, softDeleteMeta.columnName(), now);
+        } catch (SQLException e) {
+            throw new PersistenceException(
+                "Failed to soft delete entity: " + e.getMessage(),
+                entityClass,
+                e
+            );
+        }
+    }
+
+    /**
+     * Force delete an entity (actually remove from database).
+     * Bypasses soft delete and performs a real DELETE.
+     *
+     * @param entity the entity to delete
+     * @param connection the database connection
+     * @param dialect the SQL dialect
+     */
+    static void forceDelete(Object entity, Connection connection, SqlDialect dialect) {
+        Objects.requireNonNull(entity, "Entity cannot be null");
+        Objects.requireNonNull(connection, "Connection cannot be null");
+
+        Class<?> entityClass = entity.getClass();
+        EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(entityClass);
+        EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(entityClass);
+
+        Object id = EntityReflector.getIdOrNull(entity);
+        if (Objects.isNull(id)) {
+            throw new PersistenceException(
+                "Cannot delete entity without ID.",
+                entityClass
+            );
+        }
+
+        String tableName = Objects.nonNull(entityMeta.schema())
+            ? dialect.quoteIdentifier(entityMeta.schema()) + "." + dialect.quoteIdentifier(entityMeta.tableName())
+            : dialect.quoteIdentifier(entityMeta.tableName());
+
+        String sql = "DELETE FROM " + tableName +
+            " WHERE " + dialect.quoteIdentifier(idMeta.columnName()) + " = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setObject(1, convertIdForQuery(id, idMeta));
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException(
+                "Failed to force delete entity: " + e.getMessage(),
+                entityClass,
+                e
+            );
+        }
+    }
+
+    /**
+     * Restore a soft-deleted entity (set deleted_at to NULL).
+     *
+     * @param entity the entity to restore
+     * @param connection the database connection
+     * @param dialect the SQL dialect
+     */
+    static void restore(Object entity, Connection connection, SqlDialect dialect) {
+        Objects.requireNonNull(entity, "Entity cannot be null");
+        Objects.requireNonNull(connection, "Connection cannot be null");
+
+        Class<?> entityClass = entity.getClass();
+        SoftDeleteMeta softDeleteMeta = getSoftDeleteMeta(entityClass);
+
+        if (!softDeleteMeta.enabled()) {
+            throw new PersistenceException(
+                "Cannot restore entity without @SoftDeletes annotation.",
+                entityClass
+            );
+        }
+
+        EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(entityClass);
+        EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(entityClass);
+
+        Object id = EntityReflector.getIdOrNull(entity);
+        if (Objects.isNull(id)) {
+            throw new PersistenceException(
+                "Cannot restore entity without ID.",
+                entityClass
+            );
+        }
+
+        String tableName = Objects.nonNull(entityMeta.schema())
+            ? dialect.quoteIdentifier(entityMeta.schema()) + "." + dialect.quoteIdentifier(entityMeta.tableName())
+            : dialect.quoteIdentifier(entityMeta.tableName());
+
+        String sql = "UPDATE " + tableName +
+            " SET " + dialect.quoteIdentifier(softDeleteMeta.columnName()) + " = NULL" +
+            " WHERE " + dialect.quoteIdentifier(idMeta.columnName()) + " = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setObject(1, convertIdForQuery(id, idMeta));
+            ps.executeUpdate();
+
+            // Clear the entity's deleted_at field
+            setDeletedAtValue(entity, softDeleteMeta.columnName(), null);
+        } catch (SQLException e) {
+            throw new PersistenceException(
+                "Failed to restore entity: " + e.getMessage(),
+                entityClass,
+                e
+            );
+        }
     }
 }

@@ -10,7 +10,10 @@ import org.junit.jupiter.api.Test;
 import sant1ago.dev.suprim.annotation.entity.Column;
 import sant1ago.dev.suprim.annotation.entity.Entity;
 import sant1ago.dev.suprim.annotation.entity.Id;
+import sant1ago.dev.suprim.annotation.entity.SoftDeletes;
 import sant1ago.dev.suprim.annotation.type.GenerationType;
+
+import java.time.LocalDateTime;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -48,6 +51,12 @@ class SuprimEntityTest {
                 "\"id\" VARCHAR(36) PRIMARY KEY, " +
                 "\"name\" VARCHAR(255))"
             );
+            conn.createStatement().execute(
+                "CREATE TABLE IF NOT EXISTS \"soft_delete_users\" (" +
+                "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                "\"email\" VARCHAR(255), " +
+                "\"deleted_at\" TIMESTAMP)"
+            );
         }
     }
 
@@ -56,6 +65,7 @@ class SuprimEntityTest {
         try (Connection conn = dataSource.getConnection()) {
             conn.createStatement().execute("DROP TABLE IF EXISTS \"entity_users\"");
             conn.createStatement().execute("DROP TABLE IF EXISTS \"custom_gen_users\"");
+            conn.createStatement().execute("DROP TABLE IF EXISTS \"soft_delete_users\"");
         }
     }
 
@@ -925,6 +935,104 @@ class SuprimEntityTest {
             assertTrue(ex.getMessage().contains("No active transaction context"));
         }
 
+        @Test
+        @DisplayName("restore throws when no context and no global executor")
+        void restore_noContextNoExecutor_throws() {
+            AutoCommitSoftDeleteUser user = new AutoCommitSoftDeleteUser();
+            user.setId("test-id");
+
+            IllegalStateException ex = assertThrows(IllegalStateException.class, user::restore);
+            assertTrue(ex.getMessage().contains("No active transaction context"));
+        }
+
+        @Test
+        @DisplayName("forceDelete throws when no context and no global executor")
+        void forceDelete_noContextNoExecutor_throws() {
+            AutoCommitSoftDeleteUser user = new AutoCommitSoftDeleteUser();
+            user.setId("test-id");
+
+            IllegalStateException ex = assertThrows(IllegalStateException.class, user::forceDelete);
+            assertTrue(ex.getMessage().contains("No active transaction context"));
+        }
+
+        @Test
+        @DisplayName("restore works with global executor (auto-commit)")
+        void restore_withGlobalExecutor_autoCommits() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"autocommit_soft_users\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"email\" VARCHAR(255), " +
+                    "\"deleted_at\" TIMESTAMP)"
+                );
+            }
+
+            try {
+                SuprimContext.setGlobalExecutor(executor);
+
+                AutoCommitSoftDeleteUser user = new AutoCommitSoftDeleteUser();
+                user.setEmail("restore-autocommit@test.com");
+                user.save();
+
+                // Soft delete
+                user.delete();
+                assertNotNull(user.getDeletedAt());
+
+                // Restore in auto-commit mode
+                user.restore();
+                assertNull(user.getDeletedAt());
+
+                // Verify in DB
+                try (Connection conn = dataSource.getConnection();
+                     var rs = conn.createStatement().executeQuery(
+                         "SELECT \"deleted_at\" FROM \"autocommit_soft_users\" WHERE \"id\" = '" + user.getId() + "'")) {
+                    assertTrue(rs.next());
+                    assertNull(rs.getTimestamp("deleted_at"));
+                }
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"autocommit_soft_users\"");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("forceDelete works with global executor (auto-commit)")
+        void forceDelete_withGlobalExecutor_autoCommits() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"autocommit_soft_users\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"email\" VARCHAR(255), " +
+                    "\"deleted_at\" TIMESTAMP)"
+                );
+            }
+
+            try {
+                SuprimContext.setGlobalExecutor(executor);
+
+                AutoCommitSoftDeleteUser user = new AutoCommitSoftDeleteUser();
+                user.setEmail("forcedelete-autocommit@test.com");
+                user.save();
+                String id = user.getId();
+
+                // Force delete in auto-commit mode
+                user.forceDelete();
+
+                // Verify actually deleted from DB
+                try (Connection conn = dataSource.getConnection();
+                     var rs = conn.createStatement().executeQuery(
+                         "SELECT COUNT(*) FROM \"autocommit_soft_users\" WHERE \"id\" = '" + id + "'")) {
+                    assertTrue(rs.next());
+                    assertEquals(0, rs.getInt(1));
+                }
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"autocommit_soft_users\"");
+                }
+            }
+        }
+
         @Entity(table = "autocommit_users")
         static class AutoCommitUser extends SuprimEntity {
             @Id(strategy = GenerationType.UUID_V7)
@@ -939,5 +1047,179 @@ class SuprimEntityTest {
             public String getEmail() { return email; }
             public void setEmail(String email) { this.email = email; }
         }
+
+        @Entity(table = "autocommit_soft_users")
+        @SoftDeletes
+        static class AutoCommitSoftDeleteUser extends SuprimEntity {
+            @Id(strategy = GenerationType.UUID_V7)
+            @Column(name = "id")
+            private String id;
+
+            @Column(name = "email")
+            private String email;
+
+            @Column(name = "deleted_at")
+            private LocalDateTime deletedAt;
+
+            public String getId() { return id; }
+            public void setId(String id) { this.id = id; }
+            public String getEmail() { return email; }
+            public void setEmail(String email) { this.email = email; }
+            public LocalDateTime getDeletedAt() { return deletedAt; }
+            public void setDeletedAt(LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
+        }
+    }
+
+    // ==================== SOFT DELETE TESTS ====================
+
+    @Nested
+    @DisplayName("Soft Delete Operations")
+    class SoftDeleteTests {
+
+        @Test
+        @DisplayName("delete() soft deletes entity with @SoftDeletes")
+        void delete_softDeletesEntity() {
+            executor.transaction(tx -> {
+                SoftDeleteUser user = new SoftDeleteUser();
+                user.setEmail("soft@test.com");
+                tx.save(user);
+
+                assertNull(user.getDeletedAt());
+                assertFalse(user.trashed());
+
+                user.delete();
+
+                assertNotNull(user.getDeletedAt());
+                assertTrue(user.trashed());
+            });
+        }
+
+        @Test
+        @DisplayName("restore() clears deleted_at")
+        void restore_clearsDeletedAt() {
+            executor.transaction(tx -> {
+                SoftDeleteUser user = new SoftDeleteUser();
+                user.setEmail("restore@test.com");
+                tx.save(user);
+
+                user.delete();
+                assertTrue(user.trashed());
+
+                user.restore();
+
+                assertNull(user.getDeletedAt());
+                assertFalse(user.trashed());
+            });
+        }
+
+        @Test
+        @DisplayName("forceDelete() actually removes record")
+        void forceDelete_removesRecord() {
+            executor.transaction(tx -> {
+                SoftDeleteUser user = new SoftDeleteUser();
+                user.setEmail("force@test.com");
+                tx.save(user);
+                String id = user.getId();
+
+                user.forceDelete();
+
+                // Verify record is actually deleted
+                java.util.List<SoftDeleteUser> found = tx.query(
+                    sant1ago.dev.suprim.core.query.Suprim.selectRaw("*")
+                        .from(sant1ago.dev.suprim.core.type.Table.of("soft_delete_users", SoftDeleteUser.class))
+                        .whereRaw("\"id\" = '" + id + "'")
+                        .build(),
+                    rs -> {
+                        SoftDeleteUser u = new SoftDeleteUser();
+                        u.setId(rs.getString("id"));
+                        return u;
+                    }
+                );
+                assertTrue(found.isEmpty());
+            });
+        }
+
+        @Test
+        @DisplayName("trashed() returns true when deleted_at is set")
+        void trashed_returnsTrueWhenDeleted() {
+            SoftDeleteUser user = new SoftDeleteUser();
+            assertFalse(user.trashed());
+
+            user.setDeletedAt(LocalDateTime.now());
+            assertTrue(user.trashed());
+
+            user.setDeletedAt(null);
+            assertFalse(user.trashed());
+        }
+
+        @Test
+        @DisplayName("refresh() loads deleted_at from database")
+        void refresh_loadsDeletedAt() {
+            executor.transaction(tx -> {
+                SoftDeleteUser user = new SoftDeleteUser();
+                user.setEmail("refresh@test.com");
+                tx.save(user);
+
+                user.delete();
+                LocalDateTime deletedTime = user.getDeletedAt();
+
+                // Clear local state
+                user.setDeletedAt(null);
+                assertNull(user.getDeletedAt());
+
+                // Refresh should reload from DB
+                user.refresh();
+                assertNotNull(user.getDeletedAt());
+            });
+        }
+
+        @Test
+        @DisplayName("delete then restore then verify in DB")
+        void delete_restore_verifyInDb() {
+            executor.transaction(tx -> {
+                SoftDeleteUser user = new SoftDeleteUser();
+                user.setEmail("cycle@test.com");
+                tx.save(user);
+                String id = user.getId();
+
+                // Soft delete
+                user.delete();
+                assertTrue(user.trashed());
+
+                // Refresh to verify DB state
+                user.refresh();
+                assertTrue(user.trashed());
+
+                // Restore
+                user.restore();
+                assertFalse(user.trashed());
+
+                // Refresh to verify DB state
+                user.refresh();
+                assertFalse(user.trashed());
+                assertNull(user.getDeletedAt());
+            });
+        }
+    }
+
+    @Entity(table = "soft_delete_users")
+    @SoftDeletes
+    static class SoftDeleteUser extends SuprimEntity {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @Column(name = "email")
+        private String email;
+
+        @Column(name = "deleted_at")
+        private LocalDateTime deletedAt;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+        public LocalDateTime getDeletedAt() { return deletedAt; }
+        public void setDeletedAt(LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
     }
 }

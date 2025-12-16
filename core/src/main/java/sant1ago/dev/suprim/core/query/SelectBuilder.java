@@ -1,5 +1,6 @@
 package sant1ago.dev.suprim.core.query;
 
+import sant1ago.dev.suprim.annotation.entity.SoftDeletes;
 import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
 import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.core.dialect.UnsupportedDialectFeatureException;
@@ -48,6 +49,20 @@ public final class SelectBuilder {
     // Eager loading
     private final List<EagerLoadSpec> eagerLoads = new ArrayList<>();
     private final Set<String> withoutRelations = new HashSet<>();
+    // Soft delete scope
+    private SoftDeleteScope softDeleteScope = SoftDeleteScope.DEFAULT;
+
+    /**
+     * Soft delete query scope.
+     */
+    public enum SoftDeleteScope {
+        /** Default behavior - exclude soft deleted records (WHERE deleted_at IS NULL) */
+        DEFAULT,
+        /** Include soft deleted records - no filter applied */
+        WITH_TRASHED,
+        /** Only return soft deleted records (WHERE deleted_at IS NOT NULL) */
+        ONLY_TRASHED
+    }
 
     public SelectBuilder(List<? extends Expression<?>> expressions) {
         Objects.requireNonNull(expressions, "expressions cannot be null");
@@ -1031,6 +1046,77 @@ public final class SelectBuilder {
         return this;
     }
 
+    // ==================== SOFT DELETE SCOPE ====================
+
+    /**
+     * Include soft-deleted records in query results.
+     * By default, queries on entities with @SoftDeletes exclude deleted records.
+     * Use this to include them.
+     *
+     * <pre>{@code
+     * // Include all users, even soft-deleted ones
+     * Suprim.select(User_.ID, User_.EMAIL)
+     *     .from(User_.TABLE)
+     *     .withTrashed()
+     *     .build();
+     * }</pre>
+     *
+     * @return this builder for chaining
+     */
+    public SelectBuilder withTrashed() {
+        this.softDeleteScope = SoftDeleteScope.WITH_TRASHED;
+        return this;
+    }
+
+    /**
+     * Only return soft-deleted records.
+     * Queries only records where deleted_at IS NOT NULL.
+     *
+     * <pre>{@code
+     * // Get only soft-deleted users
+     * Suprim.select(User_.ID, User_.EMAIL)
+     *     .from(User_.TABLE)
+     *     .onlyTrashed()
+     *     .build();
+     * }</pre>
+     *
+     * @return this builder for chaining
+     */
+    public SelectBuilder onlyTrashed() {
+        this.softDeleteScope = SoftDeleteScope.ONLY_TRASHED;
+        return this;
+    }
+
+    /**
+     * Get the current soft delete scope.
+     * Used by executors to apply soft delete filtering.
+     *
+     * @return the soft delete scope
+     */
+    public SoftDeleteScope getSoftDeleteScope() {
+        return softDeleteScope;
+    }
+
+    /**
+     * Get the FROM table.
+     * Used by executors to determine entity type for soft delete filtering.
+     *
+     * @return the from table, or null if not set
+     */
+    public Table<?> getFromTable() {
+        return fromTable;
+    }
+
+    /**
+     * Get the entity class from the FROM table.
+     * Used by executors to check for @SoftDeletes annotation.
+     *
+     * @return the entity class, or null if from table not set
+     */
+    public Class<?> getEntityType() {
+        return nonNull(fromTable) ? fromTable.getEntityType() : null;
+    }
+
     // ==================== EAGER LOADING ====================
 
     /**
@@ -1342,6 +1428,61 @@ public final class SelectBuilder {
     }
 
     /**
+     * Apply soft delete filter based on entity's @SoftDeletes annotation and current scope.
+     * Called automatically during build().
+     *
+     * - DEFAULT scope: Adds WHERE deleted_at IS NULL (if entity has @SoftDeletes)
+     * - WITH_TRASHED scope: No filter applied
+     * - ONLY_TRASHED scope: Adds WHERE deleted_at IS NOT NULL
+     */
+    private void applySoftDeleteFilter(SqlDialect dialect) {
+        // Skip if no from table or entity type
+        if (isNull(fromTable) || isNull(fromTable.getEntityType())) {
+            return;
+        }
+
+        // Check if entity has @SoftDeletes annotation
+        Class<?> entityClass = fromTable.getEntityType();
+        SoftDeletes softDeletes = entityClass.getAnnotation(SoftDeletes.class);
+        if (isNull(softDeletes)) {
+            return; // Entity doesn't support soft deletes
+        }
+
+        String columnName = softDeletes.column();
+        String qualifiedColumn = fromTable.getName() + "." + columnName;
+
+        switch (softDeleteScope) {
+            case DEFAULT -> {
+                // Exclude soft-deleted records: WHERE deleted_at IS NULL
+                Predicate softDeletePredicate = new Predicate.RawPredicate(
+                        dialect.quoteIdentifier(fromTable.getName()) + "." +
+                        dialect.quoteIdentifier(columnName) + " IS NULL"
+                );
+                if (isNull(this.whereClause)) {
+                    this.whereClause = softDeletePredicate;
+                } else {
+                    this.whereClause = this.whereClause.and(softDeletePredicate);
+                }
+            }
+            case WITH_TRASHED -> {
+                // Include all records - no filter needed
+            }
+            case ONLY_TRASHED -> {
+                // Only soft-deleted records: WHERE deleted_at IS NOT NULL
+                Predicate onlyTrashedPredicate = new Predicate.RawPredicate(
+                        dialect.quoteIdentifier(fromTable.getName()) + "." +
+                        dialect.quoteIdentifier(columnName) + " IS NOT NULL"
+                );
+                if (isNull(this.whereClause)) {
+                    this.whereClause = onlyTrashedPredicate;
+                } else {
+                    this.whereClause = this.whereClause.and(onlyTrashedPredicate);
+                }
+            }
+        }
+    }
+
+    /**
      * Build the query using default PostgreSQL dialect.
      */
     public QueryResult build() {
@@ -1354,6 +1495,9 @@ public final class SelectBuilder {
     public QueryResult build(SqlDialect dialect) {
         // Apply default eager loads from @Entity(with = {...}) annotation
         mergeDefaultEagerLoads();
+
+        // Apply soft delete filter based on entity's @SoftDeletes annotation
+        applySoftDeleteFilter(dialect);
 
         // Create parameter context for collecting WHERE/HAVING parameters
         ParameterContext paramContext = new ParameterContext();
@@ -1462,7 +1606,7 @@ public final class SelectBuilder {
         Map<String, Object> allParams = new LinkedHashMap<>(parameters);
         allParams.putAll(paramContext.getParameters());
 
-        return new QueryResult(sql.toString(), allParams, new ArrayList<>(eagerLoads));
+        return new QueryResult(sql.toString(), allParams, new ArrayList<>(eagerLoads), softDeleteScope);
     }
 
     private String nextParamName() {

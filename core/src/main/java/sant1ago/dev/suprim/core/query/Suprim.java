@@ -308,6 +308,52 @@ public final class Suprim {
         return new DeleteBuilder(table);
     }
 
+    // ==================== BULK SOFT DELETE / RESTORE ====================
+
+    /**
+     * Build a bulk soft delete query (sets deleted_at = NOW()).
+     * Use with .where() to specify which records to soft delete.
+     *
+     * <pre>{@code
+     * // Soft delete all inactive users
+     * QueryResult query = Suprim.softDelete(User_.TABLE, "deleted_at")
+     *     .where(User_.IS_ACTIVE.eq(false))
+     *     .build();
+     *
+     * tx.execute(query);
+     * }</pre>
+     *
+     * @param table the table to update
+     * @param deletedAtColumn the name of the deleted_at column
+     * @return UpdateBuilder for chaining
+     */
+    public static UpdateBuilder softDelete(Table<?> table, String deletedAtColumn) {
+        return new UpdateBuilder(table)
+                .setRaw(deletedAtColumn, sant1ago.dev.suprim.core.type.Fn.now());
+    }
+
+    /**
+     * Build a bulk restore query (sets deleted_at = NULL).
+     * Use with .where() to specify which records to restore.
+     *
+     * <pre>{@code
+     * // Restore all users deleted in the last 30 days
+     * QueryResult query = Suprim.restore(User_.TABLE, "deleted_at")
+     *     .whereRaw("deleted_at > NOW() - INTERVAL '30 days'")
+     *     .build();
+     *
+     * tx.execute(query);
+     * }</pre>
+     *
+     * @param table the table to update
+     * @param deletedAtColumn the name of the deleted_at column
+     * @return UpdateBuilder for chaining
+     */
+    public static UpdateBuilder restore(Table<?> table, String deletedAtColumn) {
+        return new UpdateBuilder(table)
+                .setNull(deletedAtColumn);
+    }
+
     // ==================== AGGREGATE FUNCTIONS ====================
 
     /**

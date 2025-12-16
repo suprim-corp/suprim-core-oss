@@ -181,4 +181,80 @@ public abstract class SuprimEntity {
         }
         return this;
     }
+
+    // ==================== Soft Delete Methods ====================
+
+    /**
+     * Check if this entity is soft-deleted.
+     *
+     * <p>Returns true if the entity has {@code @SoftDeletes} annotation
+     * and the {@code deleted_at} column is not null.
+     *
+     * @return true if soft-deleted, false otherwise
+     */
+    public boolean trashed() {
+        return EntityPersistence.isTrashed(this);
+    }
+
+    /**
+     * Restore a soft-deleted entity.
+     *
+     * <p>Sets {@code deleted_at} to NULL, making the entity visible again.
+     * Only works on entities with {@code @SoftDeletes} annotation.
+     *
+     * @return this entity
+     * @throws IllegalStateException if no transaction context and no global executor
+     * @throws PersistenceException if entity doesn't have @SoftDeletes or restore fails
+     */
+    public SuprimEntity restore() {
+        if (SuprimContext.hasContext()) {
+            Connection connection = SuprimContext.getConnection();
+            SqlDialect dialect = SuprimContext.getDialect();
+            EntityPersistence.restore(this, connection, dialect);
+        } else {
+            SuprimExecutor executor = SuprimContext.getGlobalExecutor();
+            if (Objects.isNull(executor)) {
+                throw new IllegalStateException(
+                    "No active transaction context and no global executor registered. " +
+                    "Either call restore() within executor.transaction(tx -> {...}) " +
+                    "or register a global executor with SuprimContext.setGlobalExecutor(executor)"
+                );
+            }
+            executor.executeAutoCommit((conn, dialect) -> {
+                EntityPersistence.restore(this, conn, dialect);
+                return null;
+            });
+        }
+        return this;
+    }
+
+    /**
+     * Force delete this entity from the database.
+     *
+     * <p>Performs a real DELETE, bypassing soft delete even if
+     * {@code @SoftDeletes} is present. Use this to permanently
+     * remove a record.
+     *
+     * @throws IllegalStateException if no transaction context and no global executor
+     * @throws PersistenceException if delete fails or entity has no ID
+     */
+    public void forceDelete() {
+        if (SuprimContext.hasContext()) {
+            Connection connection = SuprimContext.getConnection();
+            SqlDialect dialect = SuprimContext.getDialect();
+            EntityPersistence.forceDelete(this, connection, dialect);
+        } else {
+            SuprimExecutor executor = SuprimContext.getGlobalExecutor();
+            if (Objects.isNull(executor)) {
+                throw new IllegalStateException(
+                    "No active transaction context and no global executor registered. " +
+                    "Either call forceDelete() within executor.transaction(tx -> {...}) " +
+                    "or register a global executor with SuprimContext.setGlobalExecutor(executor)"
+                );
+            }
+            executor.executeAutoCommitVoid((conn, dialect) -> {
+                EntityPersistence.forceDelete(this, conn, dialect);
+            });
+        }
+    }
 }
