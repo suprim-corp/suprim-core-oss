@@ -165,6 +165,33 @@ executor.transaction(tx -> {
 });
 ```
 
+### Active Record Pattern
+
+Extend `SuprimEntity` to add `save()` directly on your entities:
+
+```java
+@Entity(table = "users")
+public class User extends SuprimEntity {
+    @Id(strategy = GenerationType.UUID_V7)
+    @Column(name = "id")
+    private UUID id;
+
+    @Column(name = "email")
+    private String email;
+
+    // getters/setters
+}
+
+// Usage
+executor.transaction(tx -> {
+    User user = new User();
+    user.setEmail("test@example.com");
+    user.save();  // Active Record style
+
+    System.out.println(user.getId());  // ID generated
+});
+```
+
 ## License
 
 Suprim is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
