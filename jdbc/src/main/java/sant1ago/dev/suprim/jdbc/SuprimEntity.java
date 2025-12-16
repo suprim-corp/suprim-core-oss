@@ -60,4 +60,50 @@ public abstract class SuprimEntity {
         EntityPersistence.save(this, connection, dialect);
         return this;
     }
+
+    /**
+     * Update this entity in the database.
+     *
+     * <p>Entity must have an ID set. Updates all non-null columns.
+     *
+     * @return this entity
+     * @throws IllegalStateException if not within transaction context
+     * @throws PersistenceException if update fails or entity has no ID
+     */
+    public SuprimEntity update() {
+        Connection connection = SuprimContext.getConnection();
+        SqlDialect dialect = SuprimContext.getDialect();
+        EntityPersistence.update(this, connection, dialect);
+        return this;
+    }
+
+    /**
+     * Delete this entity from the database.
+     *
+     * <p>Entity must have an ID set.
+     *
+     * @throws IllegalStateException if not within transaction context
+     * @throws PersistenceException if delete fails or entity has no ID
+     */
+    public void delete() {
+        Connection connection = SuprimContext.getConnection();
+        SqlDialect dialect = SuprimContext.getDialect();
+        EntityPersistence.delete(this, connection, dialect);
+    }
+
+    /**
+     * Refresh this entity from the database.
+     *
+     * <p>Reloads all column values from the database. Entity must have an ID set.
+     *
+     * @return this entity with refreshed values
+     * @throws IllegalStateException if not within transaction context
+     * @throws PersistenceException if refresh fails or entity not found
+     */
+    public SuprimEntity refresh() {
+        Connection connection = SuprimContext.getConnection();
+        SqlDialect dialect = SuprimContext.getDialect();
+        EntityPersistence.refresh(this, connection, dialect);
+        return this;
+    }
 }
