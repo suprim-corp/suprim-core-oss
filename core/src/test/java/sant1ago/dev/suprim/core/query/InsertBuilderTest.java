@@ -9,6 +9,7 @@ import sant1ago.dev.suprim.core.dialect.MySqlDialect;
 import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
 import sant1ago.dev.suprim.core.dialect.UnsupportedDialectFeatureException;
 import sant1ago.dev.suprim.core.type.Column;
+import sant1ago.dev.suprim.core.type.JsonbColumn;
 import sant1ago.dev.suprim.core.type.StringColumn;
 import sant1ago.dev.suprim.core.type.Table;
 
@@ -260,5 +261,42 @@ class InsertBuilderTest {
         // Should have only 1 parameter - the name (no ID auto-generated)
         assertEquals(1, result.parameters().size());
         assertTrue(result.parameters().containsValue("Test Name"));
+    }
+
+    // ==================== JSONB CAST Tests ====================
+
+    // Entity for JSONB tests (no ID auto-generation)
+    static class JsonEntity {
+        private String name;
+        private String payload;
+    }
+
+    private static final Table<JsonEntity> JSON_TABLE = Table.of("json_entities", JsonEntity.class);
+    private static final StringColumn<JsonEntity> JSON_NAME = new StringColumn<>(JSON_TABLE, "name", "VARCHAR(255)");
+    private static final JsonbColumn<JsonEntity> JSON_PAYLOAD = new JsonbColumn<>(JSON_TABLE, "payload", "JSONB");
+
+    @Test
+    @DisplayName("Insert with JsonbColumn wraps param with CAST for PostgreSQL")
+    void testInsertWithJsonbColumnPostgres() {
+        QueryResult result = Suprim.insertInto(JSON_TABLE)
+            .column(JSON_NAME, "Test")
+            .column(JSON_PAYLOAD, "{\"key\": \"value\"}")
+            .build(PostgreSqlDialect.INSTANCE);
+
+        String sql = result.sql();
+        assertTrue(sql.contains("CAST(:p2 AS jsonb)"), "PostgreSQL should wrap JSONB param with CAST: " + sql);
+    }
+
+    @Test
+    @DisplayName("Insert with JsonbColumn no CAST for MySQL")
+    void testInsertWithJsonbColumnMySql() {
+        QueryResult result = Suprim.insertInto(JSON_TABLE)
+            .column(JSON_NAME, "Test")
+            .column(JSON_PAYLOAD, "{\"key\": \"value\"}")
+            .build(MySqlDialect.INSTANCE);
+
+        String sql = result.sql();
+        assertFalse(sql.contains("CAST("), "MySQL should not wrap with CAST: " + sql);
+        assertTrue(sql.contains(":p2"), "MySQL should use plain param: " + sql);
     }
 }

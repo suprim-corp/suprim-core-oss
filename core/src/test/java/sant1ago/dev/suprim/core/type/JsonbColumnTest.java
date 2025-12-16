@@ -28,10 +28,11 @@ class JsonbColumnTest {
 
     @Test
     void testJsonLiteralToSqlPostgres() {
-        // PostgreSQL: adds ::jsonb cast
+        // PostgreSQL: adds CAST(... AS jsonb)
         JsonbColumn.JsonLiteral literal = new JsonbColumn.JsonLiteral("{\"key\": \"value\"}");
         String sql = literal.toSql(PostgreSqlDialect.INSTANCE);
-        assertTrue(sql.endsWith("::jsonb"));
+        assertTrue(sql.startsWith("CAST("));
+        assertTrue(sql.endsWith(" AS jsonb)"));
         assertTrue(sql.contains("{\"key\": \"value\"}"));
     }
 
@@ -40,7 +41,7 @@ class JsonbColumnTest {
         // MySQL: no cast needed
         JsonbColumn.JsonLiteral literal = new JsonbColumn.JsonLiteral("{\"key\": \"value\"}");
         String sql = literal.toSql(MySqlDialect.INSTANCE);
-        assertFalse(sql.contains("::jsonb"));
+        assertFalse(sql.contains("CAST("));
         assertTrue(sql.contains("{\"key\": \"value\"}"));
     }
 

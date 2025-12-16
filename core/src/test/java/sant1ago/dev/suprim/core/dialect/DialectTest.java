@@ -150,7 +150,7 @@ class DialectTest {
     void testJsonContainsWithPostgreSql() {
         SqlDialect dialect = PostgreSqlDialect.INSTANCE;
 
-        assertEquals("data @> '{\"active\":true}'::jsonb",
+        assertEquals("data @> CAST('{\"active\":true}' AS jsonb)",
                 dialect.jsonContains("data", "{\"active\":true}"));
     }
 

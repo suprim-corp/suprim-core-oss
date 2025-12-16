@@ -89,7 +89,7 @@ public interface SqlDialect {
 
     /**
      * Format JSON contains check.
-     * PostgreSQL: column @> 'value'::jsonb
+     * PostgreSQL: column @> CAST('value' AS jsonb)
      * MySQL: JSON_CONTAINS(column, 'value')
      *
      * @param column the column name
@@ -97,7 +97,8 @@ public interface SqlDialect {
      * @return formatted JSON contains expression
      */
     default String jsonContains(String column, String jsonValue) {
-        return column + " @> " + quoteString(jsonValue) + "::jsonb";
+        // Use CAST to avoid :: being interpreted as named parameter by Spring
+        return column + " @> CAST(" + quoteString(jsonValue) + " AS jsonb)";
     }
 
     /**
@@ -225,6 +226,21 @@ public interface SqlDialect {
                     "Use SELECT LAST_INSERT_ID() after INSERT for MySQL");
         }
         return "RETURNING " + columns;
+    }
+
+    // ==================== UUID SUPPORT ====================
+
+    /**
+     * Format UUID value for SQL.
+     * PostgreSQL: CAST('uuid-value' AS uuid)
+     * MySQL: 'uuid-value' (stored as CHAR(36))
+     *
+     * @param uuid the UUID value
+     * @return formatted UUID literal
+     */
+    default String formatUuid(java.util.UUID uuid) {
+        // Use CAST syntax to avoid :: being interpreted as named parameter by Spring
+        return "CAST(" + quoteString(uuid.toString()) + " AS uuid)";
     }
 
     // ==================== ARRAY SUPPORT ====================

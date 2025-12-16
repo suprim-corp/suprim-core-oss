@@ -2,6 +2,7 @@ package sant1ago.dev.suprim.core.type;
 
 import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.core.dialect.UnsupportedDialectFeatureException;
+import sant1ago.dev.suprim.core.query.ParameterContext;
 import sant1ago.dev.suprim.core.query.SelectBuilder;
 
 import java.util.Objects;
@@ -35,9 +36,22 @@ public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.C
     }
 
     /**
-     * Render as SQL.
+     * Render as SQL (inline literals).
      */
     String toSql(SqlDialect dialect);
+
+    /**
+     * Render as SQL with parameterization.
+     * Literal values will be replaced with named parameters.
+     *
+     * @param dialect the SQL dialect
+     * @param params the parameter context to collect values
+     * @return SQL with parameter placeholders
+     */
+    default String toSql(SqlDialect dialect, ParameterContext params) {
+        // Default: delegate to non-parameterized version
+        return toSql(dialect);
+    }
 
     /**
      * Simple predicate: left operator right.
@@ -108,6 +122,63 @@ public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.C
             };
         }
 
+        @Override
+        public String toSql(SqlDialect dialect, ParameterContext params) {
+            String leftSql = left.toSql(dialect, params);
+
+            return switch (operator) {
+                case IS_NULL -> leftSql + " IS NULL";
+                case IS_NOT_NULL -> leftSql + " IS NOT NULL";
+                case IN, NOT_IN -> {
+                    String rightSql = Objects.nonNull(right) ? right.toSql(dialect, params) : "";
+                    yield leftSql + " " + operator.getSql() + " (" + rightSql + ")";
+                }
+                case BETWEEN -> {
+                    if (right instanceof ListLiteral<?> list && list.values().size() == 2) {
+                        var vals = list.values();
+                        String min = new Literal<>(vals.get(0), Object.class).toSql(dialect, params);
+                        String max = new Literal<>(vals.get(1), Object.class).toSql(dialect, params);
+                        yield leftSql + " BETWEEN " + min + " AND " + max;
+                    }
+                    yield leftSql + " BETWEEN ?";
+                }
+                // JSONB operators - use parameterized version
+                case JSONB_CONTAINS -> {
+                    String jsonValue = extractJsonValue(right, dialect);
+                    String paramName = params.addParameter(jsonValue);
+                    if (dialect.capabilities().supportsJsonb()) {
+                        yield leftSql + " @> CAST(:" + paramName + " AS jsonb)";
+                    }
+                    yield leftSql + " @> :" + paramName;
+                }
+                case JSONB_KEY_EXISTS -> {
+                    String key = extractStringValue(right, dialect);
+                    yield dialect.jsonKeyExists(leftSql, key);
+                }
+                case ILIKE -> {
+                    if (dialect.capabilities().supportsIlike()) {
+                        String rightSql = Objects.nonNull(right) ? right.toSql(dialect, params) : "NULL";
+                        yield leftSql + " ILIKE " + rightSql;
+                    } else {
+                        String rightSql = Objects.nonNull(right) ? right.toSql(dialect, params) : "NULL";
+                        yield "LOWER(" + leftSql + ") LIKE LOWER(" + rightSql + ")";
+                    }
+                }
+                case ARRAY_CONTAINS, ARRAY_CONTAINED_BY, ARRAY_OVERLAP -> {
+                    if (!dialect.capabilities().supportsArrays()) {
+                        throw new UnsupportedDialectFeatureException("Arrays", dialect.getName(),
+                                "Consider using JSON arrays with JSON_CONTAINS() for MySQL.");
+                    }
+                    String rightSql = Objects.nonNull(right) ? right.toSql(dialect, params) : "NULL";
+                    yield leftSql + " " + operator.getSql() + " " + rightSql;
+                }
+                default -> {
+                    String rightSql = Objects.nonNull(right) ? right.toSql(dialect, params) : "NULL";
+                    yield leftSql + " " + operator.getSql() + " " + rightSql;
+                }
+            };
+        }
+
         private String extractJsonValue(Expression<?> expr, SqlDialect dialect) {
             if (expr instanceof JsonbColumn.JsonLiteral jsonLit) {
                 return jsonLit.json();
@@ -143,6 +214,11 @@ public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.C
         public String toSql(SqlDialect dialect) {
             return "(" + left.toSql(dialect) + " " + operator.name() + " " + right.toSql(dialect) + ")";
         }
+
+        @Override
+        public String toSql(SqlDialect dialect, ParameterContext params) {
+            return "(" + left.toSql(dialect, params) + " " + operator.name() + " " + right.toSql(dialect, params) + ")";
+        }
     }
 
     /**
@@ -155,6 +231,11 @@ public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.C
         @Override
         public String toSql(SqlDialect dialect) {
             return "NOT (" + predicate.toSql(dialect) + ")";
+        }
+
+        @Override
+        public String toSql(SqlDialect dialect, ParameterContext params) {
+            return "NOT (" + predicate.toSql(dialect, params) + ")";
         }
     }
 

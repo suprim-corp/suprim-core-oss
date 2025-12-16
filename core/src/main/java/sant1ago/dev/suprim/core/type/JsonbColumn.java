@@ -212,7 +212,7 @@ public final class JsonbColumn<T> extends Column<T, String> {
 
     /**
      * JSON literal for JSONB operators.
-     * PostgreSQL: 'value'::jsonb
+     * PostgreSQL: CAST('value' AS jsonb)
      * MySQL: 'value' (no cast needed, JSON_CONTAINS handles it)
      *
      * @param json the JSON string value
@@ -226,9 +226,9 @@ public final class JsonbColumn<T> extends Column<T, String> {
         @Override
         public String toSql(SqlDialect dialect) {
             String quoted = dialect.quoteString(json);
-            // PostgreSQL needs explicit ::jsonb cast
+            // PostgreSQL needs explicit jsonb cast (use CAST to avoid :: being parsed as named param)
             if (dialect.capabilities().supportsJsonb()) {
-                return quoted + "::jsonb";
+                return "CAST(" + quoted + " AS jsonb)";
             }
             // MySQL JSON functions handle type conversion internally
             return quoted;

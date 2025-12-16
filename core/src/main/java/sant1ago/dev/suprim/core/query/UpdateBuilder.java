@@ -4,6 +4,7 @@ import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
 import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.core.type.Column;
 import sant1ago.dev.suprim.core.type.Expression;
+import sant1ago.dev.suprim.core.type.JsonbColumn;
 import sant1ago.dev.suprim.core.type.Predicate;
 import sant1ago.dev.suprim.core.type.Table;
 
@@ -119,7 +120,12 @@ public final class UpdateBuilder {
             } else {
                 // Use parameter placeholder
                 String paramName = "p" + (++paramCounter);
-                setClauses.add(colName + " = :" + paramName);
+                // JSONB columns need CAST for PostgreSQL
+                if (cv.column() instanceof JsonbColumn && dialect.capabilities().supportsJsonb()) {
+                    setClauses.add(colName + " = CAST(:" + paramName + " AS jsonb)");
+                } else {
+                    setClauses.add(colName + " = :" + paramName);
+                }
                 parameters.put(paramName, cv.value());
             }
         }

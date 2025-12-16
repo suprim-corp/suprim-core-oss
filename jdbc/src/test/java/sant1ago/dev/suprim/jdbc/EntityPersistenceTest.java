@@ -3,13 +3,24 @@ package sant1ago.dev.suprim.jdbc;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.postgresql.util.PGobject;
 import sant1ago.dev.suprim.annotation.entity.Column;
 import sant1ago.dev.suprim.annotation.entity.Entity;
 import sant1ago.dev.suprim.annotation.entity.Id;
+import sant1ago.dev.suprim.annotation.entity.JsonbColumn;
 import sant1ago.dev.suprim.annotation.type.GenerationType;
 import sant1ago.dev.suprim.annotation.type.IdGenerator;
+import sant1ago.dev.suprim.annotation.type.SqlType;
+import sant1ago.dev.suprim.core.dialect.MySqlDialect;
+import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
 import sant1ago.dev.suprim.core.util.UUIDUtils;
 import sant1ago.dev.suprim.jdbc.exception.PersistenceException;
+
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -90,6 +101,31 @@ class EntityPersistenceTest {
         }
     }
 
+    // Generator without no-arg constructor (for testing instantiation failure)
+    static class NoArgConstructorGenerator implements IdGenerator<String> {
+        private final String prefix;
+
+        // Only constructor requires argument
+        public NoArgConstructorGenerator(String prefix) {
+            this.prefix = prefix;
+        }
+
+        @Override
+        public String generate() {
+            return prefix + "-123";
+        }
+    }
+
+    @Entity(table = "bad_gen")
+    static class EntityWithBadGenerator {
+        @Id(generator = NoArgConstructorGenerator.class)
+        @Column(name = "id")
+        private String id;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+    }
+
     @Entity(table = "users_custom")
     static class UserWithCustomGenerator {
         @Id(generator = CountingGenerator.class)
@@ -103,6 +139,124 @@ class EntityPersistenceTest {
         public void setId(String id) { this.id = id; }
         public String getEmail() { return email; }
         public void setEmail(String email) { this.email = email; }
+    }
+
+    @Entity(table = "jobs")
+    static class JobWithJsonb {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @Column(name = "name")
+        private String name;
+
+        @Column(name = "workspace_id", type = SqlType.UUID)
+        private String workspaceId;
+
+        @JsonbColumn
+        @Column(name = "payload", type = SqlType.JSONB)
+        private Map<String, Object> payload;
+
+        @JsonbColumn
+        @Column(name = "output", type = SqlType.JSONB)
+        private Map<String, Object> output;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getWorkspaceId() { return workspaceId; }
+        public void setWorkspaceId(String workspaceId) { this.workspaceId = workspaceId; }
+        public Map<String, Object> getPayload() { return payload; }
+        public void setPayload(Map<String, Object> payload) { this.payload = payload; }
+        public Map<String, Object> getOutput() { return output; }
+        public void setOutput(Map<String, Object> output) { this.output = output; }
+    }
+
+    // Base class for testing inherited fields
+    static abstract class BaseEntity {
+        @Column(name = "created_at")
+        private String createdAt;
+
+        @Column(name = "updated_at")
+        private String updatedAt;
+
+        public String getCreatedAt() { return createdAt; }
+        public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
+        public String getUpdatedAt() { return updatedAt; }
+        public void setUpdatedAt(String updatedAt) { this.updatedAt = updatedAt; }
+    }
+
+    @Entity(table = "posts")
+    static class PostWithInheritance extends BaseEntity {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @Column(name = "title")
+        private String title;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+    }
+
+    // Entity with UUID column type for ID
+    @Entity(table = "products")
+    static class ProductWithUuidId {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id", type = SqlType.UUID)
+        private String id;
+
+        @Column(name = "name")
+        private String name;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+    }
+
+    // Entity with UUID type field (not String)
+    @Entity(table = "orders")
+    static class OrderWithUuidField {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id", type = SqlType.UUID)
+        private java.util.UUID id;
+
+        @Column(name = "customer_id", type = SqlType.UUID)
+        private java.util.UUID customerId;
+
+        @Column(name = "description")
+        private String description;
+
+        public java.util.UUID getId() { return id; }
+        public void setId(java.util.UUID id) { this.id = id; }
+        public java.util.UUID getCustomerId() { return customerId; }
+        public void setCustomerId(java.util.UUID customerId) { this.customerId = customerId; }
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
+    }
+
+    // Base entity with UUID ID (testing inheritance)
+    static abstract class BaseWithUuidId {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id", type = SqlType.UUID)
+        private String id;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+    }
+
+    // Child entity inheriting UUID ID from base
+    @Entity(table = "child_entities")
+    static class ChildWithInheritedUuidId extends BaseWithUuidId {
+        @Column(name = "title")
+        private String title;
+
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
     }
 
     // ==================== ID META TESTS ====================
@@ -250,6 +404,517 @@ class EntityPersistenceTest {
 
             assertEquals("new-id-456", user.getId());
         }
+
+        @Test
+        @DisplayName("toColumnMap converts @JsonbColumn Map to PGobject")
+        void testJsonbColumnConvertsToPGobject() {
+            JobWithJsonb job = new JobWithJsonb();
+            job.setId("test-id");
+            job.setName("Test Job");
+
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("key1", "value1");
+            payload.put("count", 42);
+            job.setPayload(payload);
+
+            Map<String, Object> output = new HashMap<>();
+            output.put("result", "success");
+            job.setOutput(output);
+
+            Map<String, Object> columnMap = EntityReflector.toColumnMap(job);
+
+            // Verify payload is converted to PGobject with type jsonb
+            Object payloadValue = columnMap.get("payload");
+            assertInstanceOf(PGobject.class, payloadValue);
+            PGobject payloadPg = (PGobject) payloadValue;
+            assertEquals("jsonb", payloadPg.getType());
+            assertTrue(payloadPg.getValue().contains("\"key1\""));
+            assertTrue(payloadPg.getValue().contains("\"value1\""));
+
+            // Verify output is converted to PGobject with type jsonb
+            Object outputValue = columnMap.get("output");
+            assertInstanceOf(PGobject.class, outputValue);
+            PGobject outputPg = (PGobject) outputValue;
+            assertEquals("jsonb", outputPg.getType());
+            assertTrue(outputPg.getValue().contains("\"result\""));
+        }
+
+        @Test
+        @DisplayName("toColumnMap handles null @JsonbColumn fields")
+        void testJsonbColumnHandlesNull() {
+            JobWithJsonb job = new JobWithJsonb();
+            job.setId("test-id");
+            job.setName("Test Job");
+            // payload and output are null
+
+            Map<String, Object> columnMap = EntityReflector.toColumnMap(job);
+
+            // Null fields should not be in the map
+            assertFalse(columnMap.containsKey("payload"));
+            assertFalse(columnMap.containsKey("output"));
+        }
+
+        @Test
+        @DisplayName("toColumnMap preserves non-JsonbColumn fields")
+        void testNonJsonbColumnsPreserved() {
+            JobWithJsonb job = new JobWithJsonb();
+            job.setId("test-id");
+            job.setName("Test Job");
+
+            Map<String, Object> columnMap = EntityReflector.toColumnMap(job);
+
+            // Regular fields should remain as-is
+            assertEquals("test-id", columnMap.get("id"));
+            assertEquals("Test Job", columnMap.get("name"));
+        }
+
+        @Test
+        @DisplayName("toJsonbObject throws on non-serializable object")
+        void testToJsonbObjectThrowsOnNonSerializable() {
+            // Object with circular reference that Jackson can't serialize
+            Object nonSerializable = new Object() {
+                public Object getSelf() { return this; }
+            };
+
+            assertThrows(IllegalArgumentException.class, () -> {
+                EntityReflector.toJsonbObject(nonSerializable);
+            });
+        }
+
+        @Test
+        @DisplayName("buildColumnMap converts @JsonbColumn Map to PGobject")
+        @SuppressWarnings("unchecked")
+        void testBuildColumnMapJsonbHandling() throws Exception {
+            JobWithJsonb job = new JobWithJsonb();
+            job.setId("test-id");
+            job.setName("Test Job");
+
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("key1", "value1");
+            job.setPayload(payload);
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(JobWithJsonb.class);
+
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class);
+            method.setAccessible(true);
+            Map<String, Object> columnMap = (Map<String, Object>) method.invoke(null, job, idMeta, false);
+
+            // Verify payload is converted to PGobject
+            Object payloadValue = columnMap.get("payload");
+            assertInstanceOf(PGobject.class, payloadValue);
+            PGobject payloadPg = (PGobject) payloadValue;
+            assertEquals("jsonb", payloadPg.getType());
+            assertTrue(payloadPg.getValue().contains("\"key1\""));
+        }
+        @Test
+        @DisplayName("toColumnMap converts String to UUID for SqlType.UUID columns")
+        void testUuidColumnConversion() {
+            JobWithJsonb job = new JobWithJsonb();
+            job.setId("test-id");
+            job.setWorkspaceId("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1");
+
+            Map<String, Object> columnMap = EntityReflector.toColumnMap(job);
+
+            Object workspaceId = columnMap.get("workspace_id");
+            assertInstanceOf(java.util.UUID.class, workspaceId);
+            assertEquals("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1", workspaceId.toString());
+        }
+
+        @Test
+        @DisplayName("toColumnMap throws on invalid UUID format")
+        void testInvalidUuidThrows() {
+            JobWithJsonb job = new JobWithJsonb();
+            job.setId("test-id");
+            job.setWorkspaceId("abc");
+
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> {
+                EntityReflector.toColumnMap(job);
+            });
+            assertTrue(ex.getMessage().contains("Invalid UUID format"));
+            assertTrue(ex.getMessage().contains("workspace_id"));
+        }
+
+        @Test
+        @DisplayName("buildColumnMap converts String to UUID for SqlType.UUID columns")
+        @SuppressWarnings("unchecked")
+        void testBuildColumnMapUuidConversion() throws Exception {
+            JobWithJsonb job = new JobWithJsonb();
+            job.setId("test-id");
+            job.setWorkspaceId("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1");
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(JobWithJsonb.class);
+
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class);
+            method.setAccessible(true);
+            Map<String, Object> columnMap = (Map<String, Object>) method.invoke(null, job, idMeta, false);
+
+            Object workspaceId = columnMap.get("workspace_id");
+            assertInstanceOf(java.util.UUID.class, workspaceId);
+            assertEquals("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1", workspaceId.toString());
+        }
+
+        @Test
+        @DisplayName("buildColumnMap throws on invalid UUID format")
+        void testBuildColumnMapInvalidUuidThrows() throws Exception {
+            JobWithJsonb job = new JobWithJsonb();
+            job.setId("test-id");
+            job.setWorkspaceId("invalid-uuid");
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(JobWithJsonb.class);
+
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class);
+            method.setAccessible(true);
+
+            var ex = assertThrows(java.lang.reflect.InvocationTargetException.class, () -> {
+                method.invoke(null, job, idMeta, false);
+            });
+            assertInstanceOf(IllegalArgumentException.class, ex.getCause());
+            assertTrue(ex.getCause().getMessage().contains("Invalid UUID format"));
+        }
+
+        @Test
+        @DisplayName("buildColumnMap includes inherited fields from parent class")
+        @SuppressWarnings("unchecked")
+        void testBuildColumnMapIncludesInheritedFields() throws Exception {
+            PostWithInheritance post = new PostWithInheritance();
+            post.setId("post-id");
+            post.setTitle("Test Title");
+            post.setCreatedAt("2024-01-01T00:00:00Z");
+            post.setUpdatedAt("2024-01-02T00:00:00Z");
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(PostWithInheritance.class);
+
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class);
+            method.setAccessible(true);
+            Map<String, Object> columnMap = (Map<String, Object>) method.invoke(null, post, idMeta, false);
+
+            // Child class fields
+            assertEquals("post-id", columnMap.get("id"));
+            assertEquals("Test Title", columnMap.get("title"));
+            // Inherited fields from BaseEntity
+            assertEquals("2024-01-01T00:00:00Z", columnMap.get("created_at"));
+            assertEquals("2024-01-02T00:00:00Z", columnMap.get("updated_at"));
+        }
+
+        @Test
+        @DisplayName("toColumnMap includes inherited fields from parent class")
+        void testToColumnMapIncludesInheritedFields() {
+            PostWithInheritance post = new PostWithInheritance();
+            post.setId("post-id");
+            post.setTitle("Test Title");
+            post.setCreatedAt("2024-01-01T00:00:00Z");
+            post.setUpdatedAt("2024-01-02T00:00:00Z");
+
+            Map<String, Object> columnMap = EntityReflector.toColumnMap(post);
+
+            // Child class fields
+            assertEquals("post-id", columnMap.get("id"));
+            assertEquals("Test Title", columnMap.get("title"));
+            // Inherited fields from BaseEntity
+            assertEquals("2024-01-01T00:00:00Z", columnMap.get("created_at"));
+            assertEquals("2024-01-02T00:00:00Z", columnMap.get("updated_at"));
+        }
+
+        @Test
+        @DisplayName("buildColumnMap converts String ID to UUID when column type is SqlType.UUID")
+        @SuppressWarnings("unchecked")
+        void testBuildColumnMapConvertsIdToUuidWhenColumnTypeUuid() throws Exception {
+            ProductWithUuidId product = new ProductWithUuidId();
+            product.setId("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1");
+            product.setName("Test Product");
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(ProductWithUuidId.class);
+
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class);
+            method.setAccessible(true);
+            Map<String, Object> columnMap = (Map<String, Object>) method.invoke(null, product, idMeta, false);
+
+            // ID should be converted to UUID because column type is SqlType.UUID
+            Object idValue = columnMap.get("id");
+            assertInstanceOf(java.util.UUID.class, idValue);
+            assertEquals("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1", idValue.toString());
+        }
+
+        @Test
+        @DisplayName("buildColumnMap keeps UUID-format String ID as String when column type is not UUID")
+        @SuppressWarnings("unchecked")
+        void testBuildColumnMapKeepsUuidFormatStringWhenColumnTypeNotUuid() throws Exception {
+            JobWithJsonb job = new JobWithJsonb();
+            job.setId("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1");
+            job.setName("Test Job");
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(JobWithJsonb.class);
+
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class);
+            method.setAccessible(true);
+            Map<String, Object> columnMap = (Map<String, Object>) method.invoke(null, job, idMeta, false);
+
+            // UUID-format ID should stay as String because column type is not SqlType.UUID
+            Object idValue = columnMap.get("id");
+            assertInstanceOf(String.class, idValue);
+            assertEquals("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1", idValue);
+        }
+
+        @Test
+        @DisplayName("buildColumnMap throws on invalid UUID when column type is SqlType.UUID")
+        @SuppressWarnings("unchecked")
+        void testBuildColumnMapThrowsOnInvalidUuidWhenColumnTypeUuid() throws Exception {
+            ProductWithUuidId product = new ProductWithUuidId();
+            product.setId("not-a-valid-uuid");
+            product.setName("Test Product");
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(ProductWithUuidId.class);
+
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class);
+            method.setAccessible(true);
+
+            InvocationTargetException ex = assertThrows(InvocationTargetException.class,
+                () -> method.invoke(null, product, idMeta, false));
+            assertInstanceOf(IllegalArgumentException.class, ex.getCause());
+            assertTrue(ex.getCause().getMessage().contains("Invalid UUID format"));
+        }
+
+        @Test
+        @DisplayName("buildColumnMap keeps UUID type field as-is (no conversion needed)")
+        @SuppressWarnings("unchecked")
+        void testBuildColumnMapKeepsUuidFieldAsIs() throws Exception {
+            java.util.UUID uuid = java.util.UUID.fromString("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1");
+            java.util.UUID customerId = java.util.UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+
+            OrderWithUuidField order = new OrderWithUuidField();
+            order.setId(uuid);
+            order.setCustomerId(customerId);
+            order.setDescription("Test Order");
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(OrderWithUuidField.class);
+
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class);
+            method.setAccessible(true);
+            Map<String, Object> columnMap = (Map<String, Object>) method.invoke(null, order, idMeta, false);
+
+            // UUID fields should remain as UUID (no conversion from String needed)
+            Object idValue = columnMap.get("id");
+            assertInstanceOf(java.util.UUID.class, idValue);
+            assertEquals(uuid, idValue);
+
+            Object customerIdValue = columnMap.get("customer_id");
+            assertInstanceOf(java.util.UUID.class, customerIdValue);
+            assertEquals(customerId, customerIdValue);
+        }
+
+        @Test
+        @DisplayName("toColumnMap keeps UUID type field as-is (no conversion needed)")
+        void testToColumnMapKeepsUuidFieldAsIs() {
+            java.util.UUID uuid = java.util.UUID.fromString("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1");
+            java.util.UUID customerId = java.util.UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+
+            OrderWithUuidField order = new OrderWithUuidField();
+            order.setId(uuid);
+            order.setCustomerId(customerId);
+            order.setDescription("Test Order");
+
+            Map<String, Object> columnMap = EntityReflector.toColumnMap(order);
+
+            // UUID fields should remain as UUID
+            Object idValue = columnMap.get("id");
+            assertInstanceOf(java.util.UUID.class, idValue);
+            assertEquals(uuid, idValue);
+
+            Object customerIdValue = columnMap.get("customer_id");
+            assertInstanceOf(java.util.UUID.class, customerIdValue);
+            assertEquals(customerId, customerIdValue);
+        }
+
+        @Test
+        @DisplayName("buildColumnMap converts inherited String ID to UUID when column type is SqlType.UUID")
+        @SuppressWarnings("unchecked")
+        void testBuildColumnMapConvertsInheritedIdToUuid() throws Exception {
+            ChildWithInheritedUuidId child = new ChildWithInheritedUuidId();
+            child.setId("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1");
+            child.setTitle("Test Title");
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(ChildWithInheritedUuidId.class);
+
+            // Verify idMeta has correct column type
+            assertEquals(SqlType.UUID, idMeta.columnType(), "IdMeta should have UUID column type from inherited @Column");
+
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class);
+            method.setAccessible(true);
+            Map<String, Object> columnMap = (Map<String, Object>) method.invoke(null, child, idMeta, false);
+
+            // ID should be converted to UUID because column type is SqlType.UUID
+            Object idValue = columnMap.get("id");
+            assertInstanceOf(java.util.UUID.class, idValue, "Inherited String ID should be converted to UUID");
+            assertEquals("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1", idValue.toString());
+        }
+
+        @Test
+        @DisplayName("toColumnMap converts inherited String ID to UUID when column type is SqlType.UUID")
+        void testToColumnMapConvertsInheritedIdToUuid() {
+            ChildWithInheritedUuidId child = new ChildWithInheritedUuidId();
+            child.setId("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1");
+            child.setTitle("Test Title");
+
+            Map<String, Object> columnMap = EntityReflector.toColumnMap(child);
+
+            // ID should be converted to UUID
+            Object idValue = columnMap.get("id");
+            assertInstanceOf(java.util.UUID.class, idValue, "Inherited String ID should be converted to UUID");
+            assertEquals("7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1", idValue.toString());
+        }
+    }
+
+    // ==================== ENTITY REFLECTOR ADDITIONAL TESTS ====================
+
+    @Nested
+    @DisplayName("EntityReflector getId/setField methods")
+    class EntityReflectorFieldTests {
+
+        @Test
+        @DisplayName("getId returns ID value")
+        void testGetIdReturnsValue() {
+            UserWithUuidV7 user = new UserWithUuidV7();
+            user.setId("test-id-123");
+
+            Object id = EntityReflector.getId(user);
+            assertEquals("test-id-123", id);
+        }
+
+        @Test
+        @DisplayName("getId throws on null entity")
+        void testGetIdThrowsOnNullEntity() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.getId(null));
+        }
+
+        @Test
+        @DisplayName("getId throws on null ID value")
+        void testGetIdThrowsOnNullIdValue() {
+            UserWithUuidV7 user = new UserWithUuidV7();
+            // ID is null
+
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.getId(user));
+            assertTrue(ex.getMessage().contains("cannot be null"));
+        }
+
+        @Test
+        @DisplayName("setField sets value by field name")
+        void testSetFieldByName() {
+            UserWithUuidV7 user = new UserWithUuidV7();
+            EntityReflector.setField(user, "email", "test@example.com");
+
+            assertEquals("test@example.com", user.getEmail());
+        }
+
+        @Test
+        @DisplayName("setField throws on null entity")
+        void testSetFieldThrowsOnNullEntity() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setField(null, "email", "test"));
+        }
+
+        @Test
+        @DisplayName("setField throws on null/empty field name")
+        void testSetFieldThrowsOnNullFieldName() {
+            UserWithUuidV7 user = new UserWithUuidV7();
+
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setField(user, null, "test"));
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setField(user, "", "test"));
+        }
+
+        @Test
+        @DisplayName("setField throws on non-existent field")
+        void testSetFieldThrowsOnNonExistentField() {
+            UserWithUuidV7 user = new UserWithUuidV7();
+
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setField(user, "nonExistent", "test"));
+            assertTrue(ex.getMessage().contains("Field not found"));
+        }
+
+        @Test
+        @DisplayName("setFieldByColumnName sets value by column name")
+        void testSetFieldByColumnName() {
+            JobWithJsonb job = new JobWithJsonb();
+            EntityReflector.setFieldByColumnName(job, "name", "Test Job");
+
+            assertEquals("Test Job", job.getName());
+        }
+
+        @Test
+        @DisplayName("setFieldByColumnName throws on null entity")
+        void testSetFieldByColumnNameThrowsOnNullEntity() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setFieldByColumnName(null, "name", "test"));
+        }
+
+        @Test
+        @DisplayName("setFieldByColumnName throws on null/empty column name")
+        void testSetFieldByColumnNameThrowsOnNullColumnName() {
+            JobWithJsonb job = new JobWithJsonb();
+
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setFieldByColumnName(job, null, "test"));
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setFieldByColumnName(job, "", "test"));
+        }
+
+        @Test
+        @DisplayName("setFieldByColumnName throws on non-existent column")
+        void testSetFieldByColumnNameThrowsOnNonExistentColumn() {
+            JobWithJsonb job = new JobWithJsonb();
+
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setFieldByColumnName(job, "non_existent", "test"));
+            assertTrue(ex.getMessage().contains("No field found"));
+        }
+
+        @Test
+        @DisplayName("getFieldByColumnName returns value")
+        void testGetFieldByColumnName() {
+            JobWithJsonb job = new JobWithJsonb();
+            job.setName("Test Job");
+
+            Object value = EntityReflector.getFieldByColumnName(job, "name");
+            assertEquals("Test Job", value);
+        }
+
+        @Test
+        @DisplayName("getFieldByColumnName returns null for null entity")
+        void testGetFieldByColumnNameNullEntity() {
+            Object value = EntityReflector.getFieldByColumnName(null, "name");
+            assertNull(value);
+        }
+
+        @Test
+        @DisplayName("getFieldByColumnName returns null for null/empty column")
+        void testGetFieldByColumnNameNullColumn() {
+            JobWithJsonb job = new JobWithJsonb();
+
+            assertNull(EntityReflector.getFieldByColumnName(job, null));
+            assertNull(EntityReflector.getFieldByColumnName(job, ""));
+        }
+
+        @Test
+        @DisplayName("getFieldByColumnName returns null for non-existent column")
+        void testGetFieldByColumnNameNonExistent() {
+            JobWithJsonb job = new JobWithJsonb();
+
+            Object value = EntityReflector.getFieldByColumnName(job, "non_existent");
+            assertNull(value);
+        }
     }
 
     // ==================== PERSISTENCE EXCEPTION TESTS ====================
@@ -281,6 +946,599 @@ class EntityPersistenceTest {
             );
 
             assertEquals(cause, ex.getCause());
+        }
+    }
+
+    // ==================== CONVERT ID TYPE TESTS ====================
+
+    @Nested
+    @DisplayName("convertIdType")
+    class ConvertIdTypeTests {
+
+        @Test
+        @DisplayName("convertIdType returns null for null value")
+        void testConvertIdTypeNull() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertIdType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            Object result = method.invoke(null, null, String.class);
+            assertNull(result);
+        }
+
+        @Test
+        @DisplayName("convertIdType returns value when already correct type")
+        void testConvertIdTypeSameType() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertIdType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            String value = "test-id";
+            Object result = method.invoke(null, value, String.class);
+            assertEquals(value, result);
+        }
+
+        @Test
+        @DisplayName("convertIdType converts Number to Long")
+        void testConvertIdTypeToLong() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertIdType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            Object result = method.invoke(null, 123, Long.class);
+            assertEquals(123L, result);
+
+            // primitive long
+            result = method.invoke(null, 456, long.class);
+            assertEquals(456L, result);
+        }
+
+        @Test
+        @DisplayName("convertIdType converts Number to Integer")
+        void testConvertIdTypeToInteger() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertIdType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            Object result = method.invoke(null, 123L, Integer.class);
+            assertEquals(123, result);
+
+            // primitive int
+            result = method.invoke(null, 456L, int.class);
+            assertEquals(456, result);
+        }
+
+        @Test
+        @DisplayName("convertIdType converts to String")
+        void testConvertIdTypeToString() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertIdType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            Object result = method.invoke(null, 123, String.class);
+            assertEquals("123", result);
+
+            java.util.UUID uuid = java.util.UUID.randomUUID();
+            result = method.invoke(null, uuid, String.class);
+            assertEquals(uuid.toString(), result);
+        }
+
+        @Test
+        @DisplayName("convertIdType converts String to UUID")
+        void testConvertIdTypeToUuid() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertIdType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            String uuidStr = "7186e95e-944d-44a4-b1d5-fb1cb8d6e6e1";
+            Object result = method.invoke(null, uuidStr, java.util.UUID.class);
+            assertInstanceOf(java.util.UUID.class, result);
+            assertEquals(uuidStr, result.toString());
+        }
+
+        @Test
+        @DisplayName("convertIdType returns original value for unsupported conversion")
+        void testConvertIdTypeUnsupported() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "convertIdType", Object.class, Class.class);
+            method.setAccessible(true);
+
+            // Try to convert String to Boolean (unsupported)
+            Object result = method.invoke(null, "true", Boolean.class);
+            assertEquals("true", result);
+        }
+    }
+
+    // ==================== GENERATOR INSTANTIATION TESTS ====================
+
+    @Nested
+    @DisplayName("Generator Instantiation")
+    class GeneratorInstantiationTests {
+
+        @Test
+        @DisplayName("getOrCreateGenerator throws on generator without no-arg constructor")
+        void testGeneratorWithoutNoArgConstructor() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "getOrCreateGenerator", Class.class);
+            method.setAccessible(true);
+
+            var ex = assertThrows(InvocationTargetException.class, () -> {
+                method.invoke(null, NoArgConstructorGenerator.class);
+            });
+            assertInstanceOf(IllegalStateException.class, ex.getCause());
+            assertTrue(ex.getCause().getMessage().contains("Cannot instantiate ID generator"));
+            assertTrue(ex.getCause().getMessage().contains("no-arg constructor"));
+        }
+    }
+
+    // ==================== ENTITY REFLECTOR STRICT MODE TESTS ====================
+
+    @Nested
+    @DisplayName("EntityReflector Strict Mode")
+    class EntityReflectorStrictModeTests {
+
+        // Entity with private fields but no setters
+        @Entity(table = "private_only")
+        static class PrivateOnlyEntity {
+            @Id
+            @Column(name = "id")
+            private Long id;
+
+            @Column(name = "value")
+            private String value;
+
+            // No setters!
+        }
+
+        @Test
+        @DisplayName("setField throws in strict mode when no setter exists")
+        void testSetFieldStrictModeThrows() {
+            ReflectionUtils.setStrictMode(true);
+            try {
+                PrivateOnlyEntity entity = new PrivateOnlyEntity();
+
+                IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> EntityReflector.setField(entity, "value", "test"));
+                assertTrue(ex.getMessage().contains("Cannot set field"));
+            } finally {
+                ReflectionUtils.setStrictMode(false);
+            }
+        }
+
+        @Test
+        @DisplayName("setFieldByColumnName throws in strict mode when no setter exists")
+        void testSetFieldByColumnNameStrictModeThrows() {
+            ReflectionUtils.setStrictMode(true);
+            try {
+                PrivateOnlyEntity entity = new PrivateOnlyEntity();
+
+                IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> EntityReflector.setFieldByColumnName(entity, "value", "test"));
+                assertTrue(ex.getMessage().contains("Cannot set field"));
+            } finally {
+                ReflectionUtils.setStrictMode(false);
+            }
+        }
+
+        @Test
+        @DisplayName("fromMap throws in strict mode when no setter exists")
+        void testFromMapStrictModeThrows() {
+            ReflectionUtils.setStrictMode(true);
+            try {
+                Map<String, Object> attrs = new HashMap<>();
+                attrs.put("value", "test");
+
+                IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> EntityReflector.fromMap(PrivateOnlyEntity.class, attrs));
+                assertTrue(ex.getMessage().contains("Cannot set field"));
+            } finally {
+                ReflectionUtils.setStrictMode(false);
+            }
+        }
+    }
+
+    // ==================== ENTITY REFLECTOR ADDITIONAL COVERAGE ====================
+
+    @Nested
+    @DisplayName("EntityReflector Additional Coverage")
+    class EntityReflectorAdditionalTests {
+
+        @Test
+        @DisplayName("getEntityMeta throws on null class")
+        void testGetEntityMetaNullClass() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.getEntityMeta(null));
+        }
+
+        @Test
+        @DisplayName("getIdMeta throws on null class")
+        void testGetIdMetaNullClass() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.getIdMeta(null));
+        }
+
+        @Test
+        @DisplayName("setId throws on null entity")
+        void testSetIdNullEntity() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setId(null, "id"));
+        }
+
+        @Test
+        @DisplayName("toColumnMap throws on null entity")
+        void testToColumnMapNullEntity() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.toColumnMap(null));
+        }
+
+        @Test
+        @DisplayName("fromMap throws on null entity class")
+        void testFromMapNullClass() {
+            Map<String, Object> attrs = new HashMap<>();
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.fromMap(null, attrs));
+        }
+
+        @Test
+        @DisplayName("fromMap throws on null attributes")
+        void testFromMapNullAttributes() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.fromMap(UserWithUuidV7.class, null));
+        }
+
+        @Test
+        @DisplayName("fromMap creates entity and sets fields")
+        void testFromMapSetsFields() {
+            Map<String, Object> attrs = new HashMap<>();
+            attrs.put("email", "test@example.com");
+
+            UserWithUuidV7 user = EntityReflector.fromMap(UserWithUuidV7.class, attrs);
+
+            assertNotNull(user);
+            assertEquals("test@example.com", user.getEmail());
+        }
+
+        @Test
+        @DisplayName("fromMap ignores non-existent columns")
+        void testFromMapIgnoresNonExistent() {
+            Map<String, Object> attrs = new HashMap<>();
+            attrs.put("email", "test@example.com");
+            attrs.put("non_existent_column", "ignored");
+
+            UserWithUuidV7 user = EntityReflector.fromMap(UserWithUuidV7.class, attrs);
+
+            assertNotNull(user);
+            assertEquals("test@example.com", user.getEmail());
+        }
+
+        @Test
+        @DisplayName("getId throws when entity is null")
+        void testGetIdNullEntity() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.getId(null));
+        }
+
+        @Test
+        @DisplayName("setField throws when entity is null")
+        void testSetFieldNullEntity() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setField(null, "field", "value"));
+        }
+
+        @Test
+        @DisplayName("setField throws when field name is null")
+        void testSetFieldNullFieldName() {
+            UserWithUuidV7 entity = new UserWithUuidV7();
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setField(entity, null, "value"));
+        }
+
+        @Test
+        @DisplayName("setField throws when field name is empty")
+        void testSetFieldEmptyFieldName() {
+            UserWithUuidV7 entity = new UserWithUuidV7();
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setField(entity, "", "value"));
+        }
+
+        @Test
+        @DisplayName("setField throws for non-existent field")
+        void testSetFieldNonExistent() {
+            UserWithUuidV7 entity = new UserWithUuidV7();
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setField(entity, "nonExistentField", "value"));
+        }
+
+        @Test
+        @DisplayName("setFieldByColumnName throws when entity is null")
+        void testSetFieldByColumnNameNullEntity() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setFieldByColumnName(null, "column", "value"));
+        }
+
+        @Test
+        @DisplayName("setFieldByColumnName throws when column name is null")
+        void testSetFieldByColumnNameNullColumnName() {
+            UserWithUuidV7 entity = new UserWithUuidV7();
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setFieldByColumnName(entity, null, "value"));
+        }
+
+        @Test
+        @DisplayName("setFieldByColumnName throws when column name is empty")
+        void testSetFieldByColumnNameEmptyColumnName() {
+            UserWithUuidV7 entity = new UserWithUuidV7();
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setFieldByColumnName(entity, "", "value"));
+        }
+
+        @Test
+        @DisplayName("setFieldByColumnName throws for non-existent column")
+        void testSetFieldByColumnNameNonExistent() {
+            UserWithUuidV7 entity = new UserWithUuidV7();
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.setFieldByColumnName(entity, "non_existent_column", "value"));
+        }
+    }
+
+    // ==================== BUILD INSERT SQL TESTS ====================
+
+    @Nested
+    @DisplayName("buildInsertSql")
+    class BuildInsertSqlTests {
+
+        @Entity(table = "uuid_db_entity", schema = "test_schema")
+        static class UuidDbEntity {
+            @Id(strategy = GenerationType.UUID_DB)
+            @Column(name = "id", type = SqlType.UUID)
+            private String id;
+
+            @Column(name = "name")
+            private String name;
+
+            public String getId() { return id; }
+            public void setId(String id) { this.id = id; }
+            public String getName() { return name; }
+            public void setName(String name) { this.name = name; }
+        }
+
+        @Test
+        @DisplayName("buildInsertSql generates PostgreSQL RETURNING clause")
+        void testBuildInsertSqlPostgresReturning() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildInsertSql",
+                EntityReflector.EntityMeta.class,
+                EntityReflector.IdMeta.class,
+                Map.class,
+                sant1ago.dev.suprim.core.dialect.SqlDialect.class,
+                boolean.class
+            );
+            method.setAccessible(true);
+
+            EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(UuidDbEntity.class);
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(UuidDbEntity.class);
+            Map<String, Object> columns = new LinkedHashMap<>();
+            columns.put("name", "Test");
+
+            String sql = (String) method.invoke(null, entityMeta, idMeta, columns, PostgreSqlDialect.INSTANCE, true);
+
+            assertTrue(sql.contains("INSERT INTO"));
+            assertTrue(sql.contains("gen_random_uuid()"));
+            assertTrue(sql.contains("RETURNING"));
+        }
+
+        @Test
+        @DisplayName("buildInsertSql generates MySQL UUID() function")
+        void testBuildInsertSqlMysqlUuid() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildInsertSql",
+                EntityReflector.EntityMeta.class,
+                EntityReflector.IdMeta.class,
+                Map.class,
+                sant1ago.dev.suprim.core.dialect.SqlDialect.class,
+                boolean.class
+            );
+            method.setAccessible(true);
+
+            EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(UuidDbEntity.class);
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(UuidDbEntity.class);
+            Map<String, Object> columns = new LinkedHashMap<>();
+            columns.put("name", "Test");
+
+            String sql = (String) method.invoke(null, entityMeta, idMeta, columns, MySqlDialect.INSTANCE, true);
+
+            assertTrue(sql.contains("INSERT INTO"));
+            assertTrue(sql.contains("UUID()"));
+            assertFalse(sql.contains("RETURNING")); // MySQL doesn't support RETURNING
+        }
+
+        @Test
+        @DisplayName("buildInsertSql without returning ID (simple insert)")
+        void testBuildInsertSqlNoReturning() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildInsertSql",
+                EntityReflector.EntityMeta.class,
+                EntityReflector.IdMeta.class,
+                Map.class,
+                sant1ago.dev.suprim.core.dialect.SqlDialect.class,
+                boolean.class
+            );
+            method.setAccessible(true);
+
+            EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(UserWithUuidV7.class);
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(UserWithUuidV7.class);
+            Map<String, Object> columns = new LinkedHashMap<>();
+            columns.put("email", "test@example.com");
+            columns.put("id", "test-uuid");
+
+            String sql = (String) method.invoke(null, entityMeta, idMeta, columns, PostgreSqlDialect.INSTANCE, false);
+
+            assertTrue(sql.contains("INSERT INTO"));
+            assertFalse(sql.contains("RETURNING")); // Not returning ID
+            assertFalse(sql.contains("gen_random_uuid()"));
+        }
+
+        @Test
+        @DisplayName("buildInsertSql includes schema when present")
+        void testBuildInsertSqlWithSchema() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildInsertSql",
+                EntityReflector.EntityMeta.class,
+                EntityReflector.IdMeta.class,
+                Map.class,
+                sant1ago.dev.suprim.core.dialect.SqlDialect.class,
+                boolean.class
+            );
+            method.setAccessible(true);
+
+            EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(UuidDbEntity.class);
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(UuidDbEntity.class);
+            Map<String, Object> columns = new LinkedHashMap<>();
+            columns.put("name", "Test");
+
+            String sql = (String) method.invoke(null, entityMeta, idMeta, columns, PostgreSqlDialect.INSTANCE, false);
+
+            assertTrue(sql.contains("\"test_schema\".\"uuid_db_entity\""));
+        }
+    }
+
+    // ==================== GENERATE ID TESTS ====================
+
+    @Nested
+    @DisplayName("generateId")
+    class GenerateIdTests {
+
+        // Entity with UUID field type (not String)
+        @Entity(table = "uuid_field_entity")
+        static class UuidFieldEntity {
+            @Id(strategy = GenerationType.UUID_V7)
+            @Column(name = "id", type = SqlType.UUID)
+            private java.util.UUID id;
+
+            @Column(name = "name")
+            private String name;
+
+            public java.util.UUID getId() { return id; }
+            public void setId(java.util.UUID id) { this.id = id; }
+            public String getName() { return name; }
+            public void setName(String name) { this.name = name; }
+        }
+
+        @Entity(table = "uuid_v4_field_entity")
+        static class UuidV4FieldEntity {
+            @Id(strategy = GenerationType.UUID_V4)
+            @Column(name = "id", type = SqlType.UUID)
+            private java.util.UUID id;
+
+            @Column(name = "name")
+            private String name;
+
+            public java.util.UUID getId() { return id; }
+            public void setId(java.util.UUID id) { this.id = id; }
+            public String getName() { return name; }
+            public void setName(String name) { this.name = name; }
+        }
+
+        @Test
+        @DisplayName("generateId returns UUID when field type is UUID (not String)")
+        void testGenerateIdReturnsUuidType() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "generateId", EntityReflector.IdMeta.class);
+            method.setAccessible(true);
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(UuidFieldEntity.class);
+            Object result = method.invoke(null, idMeta);
+
+            assertInstanceOf(java.util.UUID.class, result);
+        }
+
+        @Test
+        @DisplayName("generateId returns UUID for UUID_V4 when field type is UUID")
+        void testGenerateIdUuidV4ReturnsUuidType() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "generateId", EntityReflector.IdMeta.class);
+            method.setAccessible(true);
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(UuidV4FieldEntity.class);
+            Object result = method.invoke(null, idMeta);
+
+            assertInstanceOf(java.util.UUID.class, result);
+        }
+
+        @Test
+        @DisplayName("generateId returns String when field type is String")
+        void testGenerateIdReturnsStringType() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "generateId", EntityReflector.IdMeta.class);
+            method.setAccessible(true);
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(UserWithUuidV7.class);
+            Object result = method.invoke(null, idMeta);
+
+            assertInstanceOf(String.class, result);
+        }
+    }
+
+    // ==================== BUILD COLUMN MAP EDGE CASES ====================
+
+    @Nested
+    @DisplayName("buildColumnMap Edge Cases")
+    class BuildColumnMapEdgeCaseTests {
+
+        // Entity with field that has empty column name (uses snake_case conversion)
+        @Entity(table = "auto_column_entity")
+        static class AutoColumnNameEntity {
+            @Id(strategy = GenerationType.UUID_V7)
+            @Column(name = "id")
+            private String id;
+
+            @Column(name = "") // Empty name - should use snake_case of field name
+            private String userName;
+
+            public String getId() { return id; }
+            public void setId(String id) { this.id = id; }
+            public String getUserName() { return userName; }
+            public void setUserName(String userName) { this.userName = userName; }
+        }
+
+        @Test
+        @DisplayName("buildColumnMap uses snake_case for empty column name")
+        @SuppressWarnings("unchecked")
+        void testBuildColumnMapEmptyColumnName() throws Exception {
+            AutoColumnNameEntity entity = new AutoColumnNameEntity();
+            entity.setId("test-id");
+            entity.setUserName("testuser");
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(AutoColumnNameEntity.class);
+
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class);
+            method.setAccessible(true);
+            Map<String, Object> columnMap = (Map<String, Object>) method.invoke(null, entity, idMeta, false);
+
+            // Should contain user_name (snake_case of userName)
+            assertTrue(columnMap.containsKey("user_name") || columnMap.containsKey("userName"),
+                "Column map should contain user_name or userName: " + columnMap.keySet());
+        }
+
+        @Test
+        @DisplayName("buildColumnMap skips ID when skipId is true")
+        @SuppressWarnings("unchecked")
+        void testBuildColumnMapSkipsId() throws Exception {
+            UserWithUuidV7 entity = new UserWithUuidV7();
+            entity.setId("test-id");
+            entity.setEmail("test@example.com");
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(UserWithUuidV7.class);
+
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class);
+            method.setAccessible(true);
+            Map<String, Object> columnMap = (Map<String, Object>) method.invoke(null, entity, idMeta, true);
+
+            // ID should be skipped
+            assertFalse(columnMap.containsKey("id"));
+            assertTrue(columnMap.containsKey("email"));
         }
     }
 }
