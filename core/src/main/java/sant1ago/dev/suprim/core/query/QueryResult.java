@@ -6,23 +6,32 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Result of building a query: SQL string, parameters, and eager load specifications.
+ * Result of building a query: SQL string, parameters, eager load specifications, and soft delete scope.
  *
  * @param sql the generated SQL query string
  * @param parameters the named parameters map
  * @param eagerLoads the list of eager load specifications
+ * @param softDeleteScope the soft delete scope for query filtering
  */
 public record QueryResult(
         String sql,
         Map<String, Object> parameters,
-        List<EagerLoadSpec> eagerLoads
+        List<EagerLoadSpec> eagerLoads,
+        SelectBuilder.SoftDeleteScope softDeleteScope
 ) {
 
     /**
-     * Constructor without eager loads (for backwards compatibility).
+     * Constructor without eager loads and soft delete scope (for backwards compatibility).
      */
     public QueryResult(String sql, Map<String, Object> parameters) {
-        this(sql, parameters, Collections.emptyList());
+        this(sql, parameters, Collections.emptyList(), SelectBuilder.SoftDeleteScope.DEFAULT);
+    }
+
+    /**
+     * Constructor without soft delete scope (for backwards compatibility).
+     */
+    public QueryResult(String sql, Map<String, Object> parameters, List<EagerLoadSpec> eagerLoads) {
+        this(sql, parameters, eagerLoads, SelectBuilder.SoftDeleteScope.DEFAULT);
     }
 
     /**
@@ -69,12 +78,33 @@ public record QueryResult(
         return !parameters.isEmpty();
     }
 
+    /**
+     * Check if soft-deleted records should be included.
+     *
+     * @return true if WITH_TRASHED scope is set
+     */
+    public boolean isWithTrashed() {
+        return softDeleteScope == SelectBuilder.SoftDeleteScope.WITH_TRASHED;
+    }
+
+    /**
+     * Check if only soft-deleted records should be returned.
+     *
+     * @return true if ONLY_TRASHED scope is set
+     */
+    public boolean isOnlyTrashed() {
+        return softDeleteScope == SelectBuilder.SoftDeleteScope.ONLY_TRASHED;
+    }
+
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append("QueryResult{sql='").append(sql).append("', params=").append(parameters);
         if (hasEagerLoads()) {
             sb.append(", eagerLoads=").append(eagerLoads.size());
+        }
+        if (softDeleteScope != SelectBuilder.SoftDeleteScope.DEFAULT) {
+            sb.append(", softDeleteScope=").append(softDeleteScope);
         }
         sb.append("}");
         return sb.toString();

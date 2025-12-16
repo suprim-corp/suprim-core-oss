@@ -84,10 +84,12 @@ public final class ExceptionTranslator {
                 .build();
     }
 
-    private static SuprimException translateBySqlState(String sql, Object[] parameters,
-                                                        String sqlState, SQLException cause) {
-        // Handle empty or too-short SQL states gracefully
-        if (Objects.isNull(sqlState) || sqlState.length() < 2) {
+    private static SuprimException translateBySqlState(
+            String sql, Object[] parameters,
+            String sqlState, SQLException cause
+    ) {
+        // sqlState guaranteed non-null by caller
+        if (sqlState.length() < 2) {
             return null;
         }
 
@@ -139,25 +141,49 @@ public final class ExceptionTranslator {
                                                        String message, SQLException cause) {
         String lowerMessage = message.toLowerCase();
 
-        // Constraint violations
-        if (lowerMessage.contains("unique") || lowerMessage.contains("duplicate")
-                || lowerMessage.contains("primary key violation")) {
+        // Unique constraint violations - check each pattern separately
+        if (lowerMessage.contains("unique")) {
             return UniqueConstraintException.fromSQLException(sql, cause);
         }
-        if (lowerMessage.contains("foreign key") || lowerMessage.contains("referential")) {
+        if (lowerMessage.contains("duplicate")) {
+            return UniqueConstraintException.fromSQLException(sql, cause);
+        }
+        if (lowerMessage.contains("primary key violation")) {
+            return UniqueConstraintException.fromSQLException(sql, cause);
+        }
+
+        // Foreign key violations
+        if (lowerMessage.contains("foreign key")) {
             return ForeignKeyException.fromSQLException(sql, cause);
         }
+        if (lowerMessage.contains("referential")) {
+            return ForeignKeyException.fromSQLException(sql, cause);
+        }
+
+        // Check constraint
         if (lowerMessage.contains("check constraint")) {
             return CheckConstraintException.fromSQLException(sql, cause);
         }
-        if (lowerMessage.contains("not null") || lowerMessage.contains("cannot be null")) {
+
+        // Not null violations
+        if (lowerMessage.contains("not null")) {
+            return NotNullException.fromSQLException(sql, cause);
+        }
+        if (lowerMessage.contains("cannot be null")) {
             return NotNullException.fromSQLException(sql, cause);
         }
 
-        // Connection issues
-        if (lowerMessage.contains("connection") && (lowerMessage.contains("closed")
-                || lowerMessage.contains("refused") || lowerMessage.contains("timeout"))) {
-            return ConnectionException.fromSQLException(cause);
+        // Connection issues - check each condition separately
+        if (lowerMessage.contains("connection")) {
+            if (lowerMessage.contains("closed")) {
+                return ConnectionException.fromSQLException(cause);
+            }
+            if (lowerMessage.contains("refused")) {
+                return ConnectionException.fromSQLException(cause);
+            }
+            if (lowerMessage.contains("timeout")) {
+                return ConnectionException.fromSQLException(cause);
+            }
         }
 
         // Deadlock

@@ -60,6 +60,51 @@ public final class UpdateBuilder {
     }
 
     /**
+     * Set column by name to expression value (for raw column references).
+     * Useful for bulk soft delete operations.
+     *
+     * <pre>{@code
+     * Suprim.update(User_.TABLE)
+     *     .setRaw("deleted_at", Fn.now())
+     *     .where(User_.IS_ACTIVE.eq(false))
+     *     .build();
+     * }</pre>
+     *
+     * @param columnName the raw column name
+     * @param expression the expression value (e.g., Fn.now())
+     * @return this builder for chaining
+     */
+    public UpdateBuilder setRaw(String columnName, Expression<?> expression) {
+        Column<?, Object> rawColumn = new Column<>(table, columnName, Object.class, null);
+        setValues.add(new ColumnValue<>(rawColumn, null, (Expression) expression));
+        return this;
+    }
+
+    /**
+     * Set column by name to NULL (for raw column references).
+     * Useful for bulk restore operations.
+     *
+     * <pre>{@code
+     * Suprim.update(User_.TABLE)
+     *     .setNull("deleted_at")
+     *     .whereRaw("deleted_at IS NOT NULL")
+     *     .build();
+     * }</pre>
+     *
+     * @param columnName the raw column name to set to NULL
+     * @return this builder for chaining
+     */
+    public UpdateBuilder setNull(String columnName) {
+        Column<?, Object> rawColumn = new Column<>(table, columnName, Object.class, null);
+        // Use SetNullMarker to indicate this should be SET column = NULL
+        setValues.add(new ColumnValue<>(rawColumn, SET_NULL_MARKER, null));
+        return this;
+    }
+
+    /** Marker object to indicate SET column = NULL */
+    private static final Object SET_NULL_MARKER = new Object();
+
+    /**
      * Add WHERE condition.
      */
     public UpdateBuilder where(Predicate predicate) {
@@ -76,6 +121,23 @@ public final class UpdateBuilder {
         } else {
             this.whereClause = this.whereClause.and(predicate);
         }
+        return this;
+    }
+
+    /**
+     * Add raw SQL WHERE condition.
+     * <pre>{@code
+     * Suprim.update(User_.TABLE)
+     *     .setNull("deleted_at")
+     *     .whereRaw("deleted_at IS NOT NULL")
+     *     .build();
+     * }</pre>
+     *
+     * @param rawSql the raw SQL condition
+     * @return this builder for chaining
+     */
+    public UpdateBuilder whereRaw(String rawSql) {
+        this.whereClause = new Predicate.RawPredicate(rawSql);
         return this;
     }
 
@@ -117,6 +179,9 @@ public final class UpdateBuilder {
             if (nonNull(cv.expression())) {
                 // Use expression SQL directly (e.g., NOW())
                 setClauses.add(colName + " = " + cv.expression().toSql(dialect));
+            } else if (cv.value() == SET_NULL_MARKER) {
+                // SET column = NULL
+                setClauses.add(colName + " = NULL");
             } else {
                 // Use parameter placeholder
                 String paramName = "p" + (++paramCounter);

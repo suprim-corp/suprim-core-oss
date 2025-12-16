@@ -79,24 +79,37 @@ public class DataIntegrityException extends ExecutionException {
     }
 
     private static DataErrorType detectFromMessage(String lowerMessage) {
-        if (lowerMessage.contains("too long") || lowerMessage.contains("value too long")) {
+        // String length issues
+        if (lowerMessage.contains("too long")) {
             return DataErrorType.STRING_TOO_LONG;
         }
+        // Numeric overflow
         if (lowerMessage.contains("overflow") || lowerMessage.contains("out of range")) {
             return DataErrorType.NUMERIC_OVERFLOW;
         }
-        if (lowerMessage.contains("date") || lowerMessage.contains("time") || lowerMessage.contains("timestamp")) {
+        // Date/time issues - check specific terms
+        if (lowerMessage.contains("timestamp")) {
             return DataErrorType.INVALID_DATETIME;
         }
-        if (lowerMessage.contains("json") || lowerMessage.contains("jsonb")) {
+        if (lowerMessage.contains("datetime")) {
+            return DataErrorType.INVALID_DATETIME;
+        }
+        if (lowerMessage.contains("date") || lowerMessage.contains("time")) {
+            return DataErrorType.INVALID_DATETIME;
+        }
+        // JSON issues - "json" matches both "json" and "jsonb"
+        if (lowerMessage.contains("json")) {
             return DataErrorType.INVALID_JSON;
         }
+        // Enum issues
         if (lowerMessage.contains("enum") || lowerMessage.contains("invalid input value")) {
             return DataErrorType.INVALID_ENUM;
         }
+        // Division by zero
         if (lowerMessage.contains("division by zero")) {
             return DataErrorType.DIVISION_BY_ZERO;
         }
+        // Invalid syntax
         if (lowerMessage.contains("invalid input syntax")) {
             return DataErrorType.INVALID_TEXT_REPRESENTATION;
         }
