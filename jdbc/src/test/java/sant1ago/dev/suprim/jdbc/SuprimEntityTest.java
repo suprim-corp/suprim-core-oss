@@ -62,6 +62,7 @@ class SuprimEntityTest {
     @AfterEach
     void cleanup() {
         SuprimContext.clearContext();
+        SuprimContext.clearGlobalExecutor();
     }
 
     // ==================== TEST ENTITIES ====================
@@ -735,6 +736,208 @@ class SuprimEntityTest {
                     conn.createStatement().execute("DROP TABLE IF EXISTS \"extra_col_entity\"");
                 }
             }
+        }
+    }
+
+    // ==================== AUTO-COMMIT MODE TESTS ====================
+
+    @Nested
+    @DisplayName("Auto-commit mode")
+    class AutoCommitModeTests {
+
+        @Test
+        @DisplayName("save works with global executor (auto-commit)")
+        void save_withGlobalExecutor_autoCommits() throws SQLException {
+            // Setup table
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"autocommit_users\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"email\" VARCHAR(255))"
+                );
+            }
+
+            try {
+                // Register global executor
+                SuprimContext.setGlobalExecutor(executor);
+
+                // Create entity outside transaction
+                AutoCommitUser user = new AutoCommitUser();
+                user.setEmail("autocommit@test.com");
+                user.save();  // Should auto-commit
+
+                // Verify saved by querying directly
+                assertNotNull(user.getId());
+                try (Connection conn = dataSource.getConnection();
+                     var rs = conn.createStatement().executeQuery(
+                         "SELECT * FROM \"autocommit_users\" WHERE \"id\" = '" + user.getId() + "'")) {
+                    assertTrue(rs.next());
+                    assertEquals("autocommit@test.com", rs.getString("email"));
+                }
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"autocommit_users\"");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("update works with global executor (auto-commit)")
+        void update_withGlobalExecutor_autoCommits() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"autocommit_users\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"email\" VARCHAR(255))"
+                );
+            }
+
+            try {
+                SuprimContext.setGlobalExecutor(executor);
+
+                AutoCommitUser user = new AutoCommitUser();
+                user.setEmail("original@test.com");
+                user.save();
+
+                user.setEmail("updated@test.com");
+                user.update();  // Auto-commit
+
+                try (Connection conn = dataSource.getConnection();
+                     var rs = conn.createStatement().executeQuery(
+                         "SELECT * FROM \"autocommit_users\" WHERE \"id\" = '" + user.getId() + "'")) {
+                    assertTrue(rs.next());
+                    assertEquals("updated@test.com", rs.getString("email"));
+                }
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"autocommit_users\"");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("delete works with global executor (auto-commit)")
+        void delete_withGlobalExecutor_autoCommits() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"autocommit_users\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"email\" VARCHAR(255))"
+                );
+            }
+
+            try {
+                SuprimContext.setGlobalExecutor(executor);
+
+                AutoCommitUser user = new AutoCommitUser();
+                user.setEmail("todelete@test.com");
+                user.save();
+                String id = user.getId();
+
+                user.delete();  // Auto-commit
+
+                try (Connection conn = dataSource.getConnection();
+                     var rs = conn.createStatement().executeQuery(
+                         "SELECT COUNT(*) FROM \"autocommit_users\" WHERE \"id\" = '" + id + "'")) {
+                    assertTrue(rs.next());
+                    assertEquals(0, rs.getInt(1));
+                }
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"autocommit_users\"");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("refresh works with global executor (auto-commit)")
+        void refresh_withGlobalExecutor_autoCommits() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"autocommit_users\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"email\" VARCHAR(255))"
+                );
+            }
+
+            try {
+                SuprimContext.setGlobalExecutor(executor);
+
+                AutoCommitUser user = new AutoCommitUser();
+                user.setEmail("original@test.com");
+                user.save();
+
+                // Modify in DB directly
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute(
+                        "UPDATE \"autocommit_users\" SET \"email\" = 'modified@test.com' WHERE \"id\" = '" + user.getId() + "'"
+                    );
+                }
+
+                user.refresh();  // Auto-commit
+                assertEquals("modified@test.com", user.getEmail());
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"autocommit_users\"");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("save throws when no context and no global executor")
+        void save_noContextNoExecutor_throws() {
+            AutoCommitUser user = new AutoCommitUser();
+            user.setEmail("test@test.com");
+
+            IllegalStateException ex = assertThrows(IllegalStateException.class, user::save);
+            assertTrue(ex.getMessage().contains("No active transaction context"));
+            assertTrue(ex.getMessage().contains("global executor"));
+        }
+
+        @Test
+        @DisplayName("update throws when no context and no global executor")
+        void update_noContextNoExecutor_throws() {
+            AutoCommitUser user = new AutoCommitUser();
+            user.setId("test-id");
+            user.setEmail("test@test.com");
+
+            IllegalStateException ex = assertThrows(IllegalStateException.class, user::update);
+            assertTrue(ex.getMessage().contains("No active transaction context"));
+        }
+
+        @Test
+        @DisplayName("delete throws when no context and no global executor")
+        void delete_noContextNoExecutor_throws() {
+            AutoCommitUser user = new AutoCommitUser();
+            user.setId("test-id");
+
+            IllegalStateException ex = assertThrows(IllegalStateException.class, user::delete);
+            assertTrue(ex.getMessage().contains("No active transaction context"));
+        }
+
+        @Test
+        @DisplayName("refresh throws when no context and no global executor")
+        void refresh_noContextNoExecutor_throws() {
+            AutoCommitUser user = new AutoCommitUser();
+            user.setId("test-id");
+
+            IllegalStateException ex = assertThrows(IllegalStateException.class, user::refresh);
+            assertTrue(ex.getMessage().contains("No active transaction context"));
+        }
+
+        @Entity(table = "autocommit_users")
+        static class AutoCommitUser extends SuprimEntity {
+            @Id(strategy = GenerationType.UUID_V7)
+            @Column(name = "id")
+            private String id;
+
+            @Column(name = "email")
+            private String email;
+
+            public String getId() { return id; }
+            public void setId(String id) { this.id = id; }
+            public String getEmail() { return email; }
+            public void setEmail(String email) { this.email = email; }
         }
     }
 }

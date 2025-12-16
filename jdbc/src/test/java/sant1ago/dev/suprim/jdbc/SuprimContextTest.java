@@ -34,6 +34,7 @@ class SuprimContextTest {
     void cleanup() {
         // Ensure context is cleared after each test
         SuprimContext.clearContext();
+        SuprimContext.clearGlobalExecutor();
     }
 
     @Nested
@@ -168,6 +169,49 @@ class SuprimContextTest {
         @DisplayName("does not throw when no context")
         void clearContext_noContext_noOp() {
             assertDoesNotThrow(SuprimContext::clearContext);
+        }
+    }
+
+    @Nested
+    @DisplayName("Global Executor")
+    class GlobalExecutorTests {
+
+        @Test
+        @DisplayName("setGlobalExecutor sets executor")
+        void setGlobalExecutor_setsExecutor() {
+            SuprimExecutor executor = SuprimExecutor.create(dataSource);
+            SuprimContext.setGlobalExecutor(executor);
+            assertTrue(SuprimContext.hasGlobalExecutor());
+            assertSame(executor, SuprimContext.getGlobalExecutor());
+        }
+
+        @Test
+        @DisplayName("setGlobalExecutor throws on null")
+        void setGlobalExecutor_nullThrows() {
+            assertThrows(NullPointerException.class, () -> SuprimContext.setGlobalExecutor(null));
+        }
+
+        @Test
+        @DisplayName("hasGlobalExecutor returns false when not set")
+        void hasGlobalExecutor_notSet_returnsFalse() {
+            assertFalse(SuprimContext.hasGlobalExecutor());
+        }
+
+        @Test
+        @DisplayName("getGlobalExecutor returns null when not set")
+        void getGlobalExecutor_notSet_returnsNull() {
+            assertNull(SuprimContext.getGlobalExecutor());
+        }
+
+        @Test
+        @DisplayName("clearGlobalExecutor clears executor")
+        void clearGlobalExecutor_clearsExecutor() {
+            SuprimExecutor executor = SuprimExecutor.create(dataSource);
+            SuprimContext.setGlobalExecutor(executor);
+            assertTrue(SuprimContext.hasGlobalExecutor());
+            SuprimContext.clearGlobalExecutor();
+            assertFalse(SuprimContext.hasGlobalExecutor());
+            assertNull(SuprimContext.getGlobalExecutor());
         }
     }
 }

@@ -707,6 +707,52 @@ public final class SuprimExecutor {
         }
     }
 
+    // ============ Auto-Commit Entity Operations ============
+
+    /**
+     * Execute an entity operation with auto-commit.
+     *
+     * <p>Used by {@link SuprimEntity#save()} and other Active Record methods
+     * when called outside an explicit transaction. Each operation gets its
+     * own connection and commits immediately.
+     *
+     * @param operation the operation to execute (receives connection and dialect)
+     * @param <T> the return type
+     * @return the operation result
+     */
+    <T> T executeAutoCommit(java.util.function.BiFunction<Connection, SqlDialect, T> operation) {
+        Connection conn = null;
+        try {
+            conn = getConnection();
+            conn.setAutoCommit(true);
+            SqlDialect currentDialect = getDialect(conn);
+            return operation.apply(conn, currentDialect);
+        } catch (SQLException e) {
+            throw TransactionException.fromSQLException(e);
+        } finally {
+            closeQuietly(conn);
+        }
+    }
+
+    /**
+     * Execute a void entity operation with auto-commit.
+     *
+     * @param operation the operation to execute (receives connection and dialect)
+     */
+    void executeAutoCommitVoid(java.util.function.BiConsumer<Connection, SqlDialect> operation) {
+        Connection conn = null;
+        try {
+            conn = getConnection();
+            conn.setAutoCommit(true);
+            SqlDialect currentDialect = getDialect(conn);
+            operation.accept(conn, currentDialect);
+        } catch (SQLException e) {
+            throw TransactionException.fromSQLException(e);
+        } finally {
+            closeQuietly(conn);
+        }
+    }
+
     // ============ Internal Helpers ============
 
     /**
