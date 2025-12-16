@@ -21,14 +21,14 @@ Open-source type-safe SQL query builder for PostgreSQL, MySQL, and MariaDB.
 <dependency>
     <groupId>dev.suprim</groupId>
     <artifactId>suprim-core</artifactId>
-    <version>0.0.3</version>
+    <version>0.0.4</version>
 </dependency>
 
 <!-- Full stack (includes core) -->
 <dependency>
     <groupId>dev.suprim</groupId>
     <artifactId>suprim-jdbc</artifactId>
-    <version>0.0.3</version>
+    <version>0.0.4</version>
 </dependency>
 ```
 
@@ -46,7 +46,7 @@ Open-source type-safe SQL query builder for PostgreSQL, MySQL, and MariaDB.
                     <path>
                         <groupId>dev.suprim</groupId>
                         <artifactId>suprim-processor</artifactId>
-                        <version>0.0.3</version>
+                        <version>0.0.4</version>
                     </path>
                 </annotationProcessorPaths>
             </configuration>
@@ -181,23 +181,44 @@ public class User extends SuprimEntity {
 
     // getters/setters
 }
+```
 
-// Usage
+#### Auto-commit Mode
+
+Register the executor once at startup, then call CRUD methods anywhere:
+
+```java
+// At app startup
+SuprimContext.setGlobalExecutor(executor);
+
+// Anywhere in your code - no transaction wrapper needed
+User user = new User();
+user.setEmail("test@example.com");
+user.save();  // Auto-commits immediately
+
+user.setEmail("updated@example.com");
+user.update();  // Auto-commits
+
+user.refresh();  // Reload from DB
+
+user.delete();  // Auto-commits
+```
+
+#### Transaction Mode
+
+For atomic multi-entity operations:
+
+```java
 executor.transaction(tx -> {
-    // Create
     User user = new User();
     user.setEmail("test@example.com");
     user.save();
 
-    // Update
-    user.setEmail("updated@example.com");
-    user.update();
+    Profile profile = new Profile();
+    profile.setUserId(user.getId());
+    profile.save();
 
-    // Refresh from DB
-    user.refresh();
-
-    // Delete
-    user.delete();
+    // Both commit together or rollback on error
 });
 ```
 

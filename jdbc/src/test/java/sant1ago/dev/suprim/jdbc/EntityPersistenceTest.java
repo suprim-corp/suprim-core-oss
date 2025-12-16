@@ -1400,6 +1400,34 @@ class EntityPersistenceTest {
 
             assertTrue(sql.contains("\"test_schema\".\"uuid_db_entity\""));
         }
+
+        @Test
+        @DisplayName("buildInsertSql with returningId=true but non-UUID_DB strategy skips uuid function")
+        void testBuildInsertSqlReturningWithNonUuidDbStrategy() throws Exception {
+            Method method = EntityPersistence.class.getDeclaredMethod(
+                "buildInsertSql",
+                EntityReflector.EntityMeta.class,
+                EntityReflector.IdMeta.class,
+                Map.class,
+                sant1ago.dev.suprim.core.dialect.SqlDialect.class,
+                boolean.class
+            );
+            method.setAccessible(true);
+
+            // UUID_V7 strategy (not UUID_DB) with returningId=true
+            EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(UserWithUuidV7.class);
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(UserWithUuidV7.class);
+            Map<String, Object> columns = new LinkedHashMap<>();
+            columns.put("email", "test@example.com");
+            columns.put("id", "app-generated-uuid");
+
+            String sql = (String) method.invoke(null, entityMeta, idMeta, columns, PostgreSqlDialect.INSTANCE, true);
+
+            assertTrue(sql.contains("INSERT INTO"));
+            assertTrue(sql.contains("RETURNING")); // Has RETURNING because returningId=true
+            assertFalse(sql.contains("gen_random_uuid()")); // No UUID function (not UUID_DB strategy)
+            assertFalse(sql.contains("UUID()")); // No UUID function
+        }
     }
 
     // ==================== GENERATE ID TESTS ====================

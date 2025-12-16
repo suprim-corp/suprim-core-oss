@@ -2,6 +2,7 @@ package sant1ago.dev.suprim.jdbc;
 
 import sant1ago.dev.suprim.core.dialect.SqlDialect;
 
+import javax.sql.DataSource;
 import java.sql.Connection;
 import java.util.Objects;
 
@@ -12,20 +13,76 @@ import java.util.Objects;
  * calling {@code save()} within a transaction. Context is set by
  * {@link SuprimExecutor} and should not be manipulated directly.
  *
+ * <p><b>Auto-commit mode:</b> Register executor globally to enable
+ * {@code entity.save()} outside explicit transactions:
+ *
  * <pre>{@code
+ * // At app startup - register globally
+ * SuprimContext.setGlobalExecutor(executor);
+ *
+ * // Now save() works anywhere (auto-commit)
+ * User user = new User();
+ * user.setEmail("test@example.com");
+ * user.save();  // Auto-commits immediately
+ *
+ * // Explicit transaction still works (for atomic multi-ops)
  * executor.transaction(tx -> {
- *     User user = new User();
- *     user.setEmail("test@example.com");
- *     user.save();  // Uses context set by executor
+ *     tx.save(user);
+ *     tx.save(profile);  // Both commit together
  * });
  * }</pre>
  */
 public final class SuprimContext {
 
     private static final ThreadLocal<TransactionContext> CONTEXT = new ThreadLocal<>();
+    private static volatile SuprimExecutor globalExecutor;
 
     private SuprimContext() {
         // Utility class
+    }
+
+    /**
+     * Register a global executor for auto-commit mode.
+     *
+     * <p>Once set, entities can call {@code save()}, {@code update()},
+     * {@code delete()} outside explicit transactions. Each operation
+     * will auto-commit immediately.
+     *
+     * <p>Call this once at application startup:
+     * <pre>{@code
+     * SuprimExecutor executor = SuprimExecutor.create(dataSource);
+     * SuprimContext.setGlobalExecutor(executor);
+     * }</pre>
+     *
+     * @param executor the executor to use for auto-commit operations
+     */
+    public static void setGlobalExecutor(SuprimExecutor executor) {
+        globalExecutor = Objects.requireNonNull(executor, "Executor cannot be null");
+    }
+
+    /**
+     * Get the global executor for auto-commit operations.
+     *
+     * @return the global executor, or null if not set
+     */
+    static SuprimExecutor getGlobalExecutor() {
+        return globalExecutor;
+    }
+
+    /**
+     * Check if a global executor is registered.
+     *
+     * @return true if global executor is set
+     */
+    public static boolean hasGlobalExecutor() {
+        return Objects.nonNull(globalExecutor);
+    }
+
+    /**
+     * Clear the global executor (useful for testing).
+     */
+    public static void clearGlobalExecutor() {
+        globalExecutor = null;
     }
 
     /**

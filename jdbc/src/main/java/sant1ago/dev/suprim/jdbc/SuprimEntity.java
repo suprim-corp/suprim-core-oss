@@ -4,6 +4,7 @@ import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.jdbc.exception.PersistenceException;
 
 import java.sql.Connection;
+import java.util.Objects;
 
 /**
  * Abstract base class enabling Active Record pattern.
@@ -19,11 +20,17 @@ import java.sql.Connection;
  *     // getters/setters
  * }
  *
- * // Usage
+ * // Auto-commit mode (register executor once at startup)
+ * SuprimContext.setGlobalExecutor(executor);
+ *
+ * User user = new User();
+ * user.setEmail("test@example.com");
+ * user.save();  // Auto-commits immediately
+ *
+ * // Explicit transaction (for atomic multi-operations)
  * executor.transaction(tx -> {
- *     User user = new User();
- *     user.setEmail("test@example.com");
- *     user.save();  // ID generated automatically
+ *     tx.save(user);
+ *     tx.save(profile);  // Both commit together
  * });
  * }</pre>
  *
@@ -39,8 +46,12 @@ public abstract class SuprimEntity {
     /**
      * Save this entity to the database.
      *
-     * <p>Must be called within a transaction context established by
-     * {@link SuprimExecutor#transaction(java.util.function.Consumer)}.
+     * <p>Works in two modes:
+     * <ul>
+     *   <li><b>Transaction mode:</b> Uses the current transaction's connection</li>
+     *   <li><b>Auto-commit mode:</b> Gets a new connection and commits immediately
+     *       (requires {@link SuprimContext#setGlobalExecutor(SuprimExecutor)} at startup)</li>
+     * </ul>
      *
      * <p>Supports all ID generation strategies:
      * <ul>
@@ -51,13 +62,30 @@ public abstract class SuprimEntity {
      * </ul>
      *
      * @return this entity (with ID set if generated)
-     * @throws IllegalStateException if not within transaction context
+     * @throws IllegalStateException if no transaction context and no global executor
      * @throws PersistenceException if save fails
      */
     public SuprimEntity save() {
-        Connection connection = SuprimContext.getConnection();
-        SqlDialect dialect = SuprimContext.getDialect();
-        EntityPersistence.save(this, connection, dialect);
+        if (SuprimContext.hasContext()) {
+            // In transaction - use transaction's connection
+            Connection connection = SuprimContext.getConnection();
+            SqlDialect dialect = SuprimContext.getDialect();
+            EntityPersistence.save(this, connection, dialect);
+        } else {
+            // Auto-commit mode - use global executor
+            SuprimExecutor executor = SuprimContext.getGlobalExecutor();
+            if (Objects.isNull(executor)) {
+                throw new IllegalStateException(
+                    "No active transaction context and no global executor registered. " +
+                    "Either call save() within executor.transaction(tx -> {...}) " +
+                    "or register a global executor with SuprimContext.setGlobalExecutor(executor)"
+                );
+            }
+            executor.executeAutoCommit((conn, dialect) -> {
+                EntityPersistence.save(this, conn, dialect);
+                return null;
+            });
+        }
         return this;
     }
 
@@ -65,15 +93,31 @@ public abstract class SuprimEntity {
      * Update this entity in the database.
      *
      * <p>Entity must have an ID set. Updates all non-null columns.
+     * Supports both transaction and auto-commit modes.
      *
      * @return this entity
-     * @throws IllegalStateException if not within transaction context
+     * @throws IllegalStateException if no transaction context and no global executor
      * @throws PersistenceException if update fails or entity has no ID
      */
     public SuprimEntity update() {
-        Connection connection = SuprimContext.getConnection();
-        SqlDialect dialect = SuprimContext.getDialect();
-        EntityPersistence.update(this, connection, dialect);
+        if (SuprimContext.hasContext()) {
+            Connection connection = SuprimContext.getConnection();
+            SqlDialect dialect = SuprimContext.getDialect();
+            EntityPersistence.update(this, connection, dialect);
+        } else {
+            SuprimExecutor executor = SuprimContext.getGlobalExecutor();
+            if (Objects.isNull(executor)) {
+                throw new IllegalStateException(
+                    "No active transaction context and no global executor registered. " +
+                    "Either call update() within executor.transaction(tx -> {...}) " +
+                    "or register a global executor with SuprimContext.setGlobalExecutor(executor)"
+                );
+            }
+            executor.executeAutoCommit((conn, dialect) -> {
+                EntityPersistence.update(this, conn, dialect);
+                return null;
+            });
+        }
         return this;
     }
 
@@ -81,29 +125,60 @@ public abstract class SuprimEntity {
      * Delete this entity from the database.
      *
      * <p>Entity must have an ID set.
+     * Supports both transaction and auto-commit modes.
      *
-     * @throws IllegalStateException if not within transaction context
+     * @throws IllegalStateException if no transaction context and no global executor
      * @throws PersistenceException if delete fails or entity has no ID
      */
     public void delete() {
-        Connection connection = SuprimContext.getConnection();
-        SqlDialect dialect = SuprimContext.getDialect();
-        EntityPersistence.delete(this, connection, dialect);
+        if (SuprimContext.hasContext()) {
+            Connection connection = SuprimContext.getConnection();
+            SqlDialect dialect = SuprimContext.getDialect();
+            EntityPersistence.delete(this, connection, dialect);
+        } else {
+            SuprimExecutor executor = SuprimContext.getGlobalExecutor();
+            if (Objects.isNull(executor)) {
+                throw new IllegalStateException(
+                    "No active transaction context and no global executor registered. " +
+                    "Either call delete() within executor.transaction(tx -> {...}) " +
+                    "or register a global executor with SuprimContext.setGlobalExecutor(executor)"
+                );
+            }
+            executor.executeAutoCommitVoid((conn, dialect) -> {
+                EntityPersistence.delete(this, conn, dialect);
+            });
+        }
     }
 
     /**
      * Refresh this entity from the database.
      *
      * <p>Reloads all column values from the database. Entity must have an ID set.
+     * Supports both transaction and auto-commit modes.
      *
      * @return this entity with refreshed values
-     * @throws IllegalStateException if not within transaction context
+     * @throws IllegalStateException if no transaction context and no global executor
      * @throws PersistenceException if refresh fails or entity not found
      */
     public SuprimEntity refresh() {
-        Connection connection = SuprimContext.getConnection();
-        SqlDialect dialect = SuprimContext.getDialect();
-        EntityPersistence.refresh(this, connection, dialect);
+        if (SuprimContext.hasContext()) {
+            Connection connection = SuprimContext.getConnection();
+            SqlDialect dialect = SuprimContext.getDialect();
+            EntityPersistence.refresh(this, connection, dialect);
+        } else {
+            SuprimExecutor executor = SuprimContext.getGlobalExecutor();
+            if (Objects.isNull(executor)) {
+                throw new IllegalStateException(
+                    "No active transaction context and no global executor registered. " +
+                    "Either call refresh() within executor.transaction(tx -> {...}) " +
+                    "or register a global executor with SuprimContext.setGlobalExecutor(executor)"
+                );
+            }
+            executor.executeAutoCommit((conn, dialect) -> {
+                EntityPersistence.refresh(this, conn, dialect);
+                return null;
+            });
+        }
         return this;
     }
 }

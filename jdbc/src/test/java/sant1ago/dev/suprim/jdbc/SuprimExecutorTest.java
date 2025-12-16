@@ -3,20 +3,29 @@ package sant1ago.dev.suprim.jdbc;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import sant1ago.dev.suprim.annotation.entity.Column;
 import sant1ago.dev.suprim.annotation.entity.Entity;
 import sant1ago.dev.suprim.annotation.entity.Id;
 import sant1ago.dev.suprim.annotation.type.SqlType;
 import sant1ago.dev.suprim.core.query.QueryResult;
+import sant1ago.dev.suprim.jdbc.exception.ConnectionException;
 import sant1ago.dev.suprim.jdbc.exception.NoResultException;
+import sant1ago.dev.suprim.jdbc.exception.TransactionException;
 
+import javax.sql.DataSource;
+import java.io.PrintWriter;
 import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
 import java.sql.Statement;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -424,5 +433,113 @@ class SuprimExecutorTest {
         public void setName(String name) { this.name = name; }
         public Boolean getIsActive() { return isActive; }
         public void setIsActive(Boolean isActive) { this.isActive = isActive; }
+    }
+
+    // ==================== AUTO-COMMIT EXCEPTION TESTS ====================
+
+    @Nested
+    @DisplayName("executeAutoCommit exception handling")
+    class ExecuteAutoCommitExceptionTests {
+
+        @Test
+        @DisplayName("executeAutoCommit throws ConnectionException on getConnection failure")
+        void executeAutoCommit_getConnectionFails_throwsConnectionException() {
+            SuprimExecutor failingExecutor = SuprimExecutor.create(new FailingDataSource());
+
+            assertThrows(ConnectionException.class, () -> {
+                failingExecutor.executeAutoCommit((conn, dialect) -> "result");
+            });
+        }
+
+        @Test
+        @DisplayName("executeAutoCommitVoid throws ConnectionException on getConnection failure")
+        void executeAutoCommitVoid_getConnectionFails_throwsConnectionException() {
+            SuprimExecutor failingExecutor = SuprimExecutor.create(new FailingDataSource());
+
+            assertThrows(ConnectionException.class, () -> {
+                failingExecutor.executeAutoCommitVoid((conn, dialect) -> {});
+            });
+        }
+
+        @Test
+        @DisplayName("executeAutoCommit throws TransactionException on setAutoCommit failure")
+        void executeAutoCommit_setAutoCommitFails_throwsTransactionException() {
+            SuprimExecutor failingExecutor = SuprimExecutor.create(new SetAutoCommitFailingDataSource());
+
+            assertThrows(TransactionException.class, () -> {
+                failingExecutor.executeAutoCommit((conn, dialect) -> "result");
+            });
+        }
+
+        @Test
+        @DisplayName("executeAutoCommitVoid throws TransactionException on setAutoCommit failure")
+        void executeAutoCommitVoid_setAutoCommitFails_throwsTransactionException() {
+            SuprimExecutor failingExecutor = SuprimExecutor.create(new SetAutoCommitFailingDataSource());
+
+            assertThrows(TransactionException.class, () -> {
+                failingExecutor.executeAutoCommitVoid((conn, dialect) -> {});
+            });
+        }
+    }
+
+    /**
+     * DataSource that always throws SQLException on getConnection().
+     */
+    static class FailingDataSource implements DataSource {
+        @Override
+        public Connection getConnection() throws SQLException {
+            throw new SQLException("Simulated connection failure", "08001");
+        }
+
+        @Override
+        public Connection getConnection(String username, String password) throws SQLException {
+            throw new SQLException("Simulated connection failure", "08001");
+        }
+
+        @Override public PrintWriter getLogWriter() { return null; }
+        @Override public void setLogWriter(PrintWriter out) {}
+        @Override public void setLoginTimeout(int seconds) {}
+        @Override public int getLoginTimeout() { return 0; }
+        @Override public Logger getParentLogger() throws SQLFeatureNotSupportedException { throw new SQLFeatureNotSupportedException(); }
+        @Override public <T> T unwrap(Class<T> iface) throws SQLException { throw new SQLException("Not supported"); }
+        @Override public boolean isWrapperFor(Class<?> iface) { return false; }
+    }
+
+    /**
+     * DataSource that returns a connection which throws on setAutoCommit().
+     */
+    static class SetAutoCommitFailingDataSource implements DataSource {
+        @Override
+        public Connection getConnection() throws SQLException {
+            return (Connection) java.lang.reflect.Proxy.newProxyInstance(
+                Connection.class.getClassLoader(),
+                new Class<?>[] { Connection.class },
+                (proxy, method, args) -> {
+                    if ("setAutoCommit".equals(method.getName())) {
+                        throw new SQLException("Simulated setAutoCommit failure", "25000");
+                    }
+                    if ("close".equals(method.getName())) {
+                        return null;
+                    }
+                    if ("isClosed".equals(method.getName())) {
+                        return false;
+                    }
+                    throw new UnsupportedOperationException("Method not mocked: " + method.getName());
+                }
+            );
+        }
+
+        @Override
+        public Connection getConnection(String username, String password) throws SQLException {
+            return getConnection();
+        }
+
+        @Override public PrintWriter getLogWriter() { return null; }
+        @Override public void setLogWriter(PrintWriter out) {}
+        @Override public void setLoginTimeout(int seconds) {}
+        @Override public int getLoginTimeout() { return 0; }
+        @Override public Logger getParentLogger() throws SQLFeatureNotSupportedException { throw new SQLFeatureNotSupportedException(); }
+        @Override public <T> T unwrap(Class<T> iface) throws SQLException { throw new SQLException("Not supported"); }
+        @Override public boolean isWrapperFor(Class<?> iface) { return false; }
     }
 }
