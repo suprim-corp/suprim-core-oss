@@ -533,6 +533,10 @@ public final class SuprimExecutor {
             conn = getConnection();
             conn.setAutoCommit(false);
 
+            // Set thread-local context for Active Record pattern
+            SqlDialect txDialect = getDialect(conn);
+            SuprimContext.setContext(conn, txDialect);
+
             // Fire BEGIN event
             beginEvent = TransactionEvent.begin(connectionName);
             dispatcher.fireTransactionEvent(beginEvent);
@@ -579,6 +583,8 @@ public final class SuprimExecutor {
                     .cause(e)
                     .build();
         } finally {
+            // Clear context before closing connection to prevent leaks
+            SuprimContext.clearContext();
             closeQuietly(conn);
         }
     }
@@ -607,6 +613,10 @@ public final class SuprimExecutor {
         try {
             conn = getConnection();
             conn.setAutoCommit(false);
+
+            // Set thread-local context for Active Record pattern
+            SqlDialect txDialect = getDialect(conn);
+            SuprimContext.setContext(conn, txDialect);
 
             // Fire BEGIN event
             beginEvent = TransactionEvent.begin(connectionName);
@@ -656,6 +666,8 @@ public final class SuprimExecutor {
                     .cause(e)
                     .build();
         } finally {
+            // Clear context before closing connection to prevent leaks
+            SuprimContext.clearContext();
             closeQuietly(conn);
         }
     }
