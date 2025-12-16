@@ -404,12 +404,247 @@ final class EntityPersistence {
     }
 
     /**
+     * Update an existing entity by ID.
+     *
+     * @param entity the entity to update
+     * @param connection the database connection
+     * @param dialect the SQL dialect
+     * @param <T> entity type
+     * @return the updated entity
+     */
+    static <T> T update(T entity, Connection connection, SqlDialect dialect) {
+        Objects.requireNonNull(entity, "Entity cannot be null");
+        Objects.requireNonNull(connection, "Connection cannot be null");
+
+        Class<?> entityClass = entity.getClass();
+        EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(entityClass);
+        EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(entityClass);
+
+        Object id = EntityReflector.getIdOrNull(entity);
+        if (Objects.isNull(id)) {
+            throw new PersistenceException(
+                "Cannot update entity without ID. Set the ID or use save() for new entities.",
+                entityClass
+            );
+        }
+
+        Map<String, Object> columns = buildColumnMap(entity, idMeta, true);
+        if (columns.isEmpty()) {
+            return entity;
+        }
+
+        String sql = buildUpdateSql(entityMeta, idMeta, columns, dialect);
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            Object[] values = columns.values().toArray();
+            setParameters(ps, values);
+            ps.setObject(values.length + 1, convertIdForQuery(id, idMeta));
+            ps.executeUpdate();
+            return entity;
+        } catch (SQLException e) {
+            throw new PersistenceException(
+                "Failed to update entity: " + e.getMessage(),
+                entityClass,
+                e
+            );
+        }
+    }
+
+    /**
+     * Delete an entity by ID.
+     *
+     * @param entity the entity to delete
+     * @param connection the database connection
+     * @param dialect the SQL dialect
+     */
+    static void delete(Object entity, Connection connection, SqlDialect dialect) {
+        Objects.requireNonNull(entity, "Entity cannot be null");
+        Objects.requireNonNull(connection, "Connection cannot be null");
+
+        Class<?> entityClass = entity.getClass();
+        EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(entityClass);
+        EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(entityClass);
+
+        Object id = EntityReflector.getIdOrNull(entity);
+        if (Objects.isNull(id)) {
+            throw new PersistenceException(
+                "Cannot delete entity without ID.",
+                entityClass
+            );
+        }
+
+        String tableName = Objects.nonNull(entityMeta.schema())
+            ? dialect.quoteIdentifier(entityMeta.schema()) + "." + dialect.quoteIdentifier(entityMeta.tableName())
+            : dialect.quoteIdentifier(entityMeta.tableName());
+
+        String sql = "DELETE FROM " + tableName +
+            " WHERE " + dialect.quoteIdentifier(idMeta.columnName()) + " = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setObject(1, convertIdForQuery(id, idMeta));
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException(
+                "Failed to delete entity: " + e.getMessage(),
+                entityClass,
+                e
+            );
+        }
+    }
+
+    /**
+     * Refresh an entity from the database.
+     *
+     * @param entity the entity to refresh
+     * @param connection the database connection
+     * @param dialect the SQL dialect
+     * @param <T> entity type
+     * @return the refreshed entity
+     */
+    static <T> T refresh(T entity, Connection connection, SqlDialect dialect) {
+        Objects.requireNonNull(entity, "Entity cannot be null");
+        Objects.requireNonNull(connection, "Connection cannot be null");
+
+        Class<?> entityClass = entity.getClass();
+        EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(entityClass);
+        EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(entityClass);
+
+        Object id = EntityReflector.getIdOrNull(entity);
+        if (Objects.isNull(id)) {
+            throw new PersistenceException(
+                "Cannot refresh entity without ID.",
+                entityClass
+            );
+        }
+
+        String tableName = Objects.nonNull(entityMeta.schema())
+            ? dialect.quoteIdentifier(entityMeta.schema()) + "." + dialect.quoteIdentifier(entityMeta.tableName())
+            : dialect.quoteIdentifier(entityMeta.tableName());
+
+        String sql = "SELECT * FROM " + tableName +
+            " WHERE " + dialect.quoteIdentifier(idMeta.columnName()) + " = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setObject(1, convertIdForQuery(id, idMeta));
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    populateEntityFromResultSet(entity, rs);
+                    return entity;
+                }
+                throw new PersistenceException(
+                    "Entity not found in database with ID: " + id,
+                    entityClass
+                );
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException(
+                "Failed to refresh entity: " + e.getMessage(),
+                entityClass,
+                e
+            );
+        }
+    }
+
+    /**
+     * Build UPDATE SQL statement.
+     */
+    private static String buildUpdateSql(
+        EntityReflector.EntityMeta entityMeta,
+        EntityReflector.IdMeta idMeta,
+        Map<String, Object> columns,
+        SqlDialect dialect
+    ) {
+        String tableName = Objects.nonNull(entityMeta.schema())
+            ? dialect.quoteIdentifier(entityMeta.schema()) + "." + dialect.quoteIdentifier(entityMeta.tableName())
+            : dialect.quoteIdentifier(entityMeta.tableName());
+
+        StringBuilder sql = new StringBuilder("UPDATE ").append(tableName).append(" SET ");
+
+        StringJoiner setJoiner = new StringJoiner(", ");
+        for (String col : columns.keySet()) {
+            setJoiner.add(dialect.quoteIdentifier(col) + " = ?");
+        }
+        sql.append(setJoiner);
+
+        sql.append(" WHERE ").append(dialect.quoteIdentifier(idMeta.columnName())).append(" = ?");
+
+        return sql.toString();
+    }
+
+    /**
+     * Convert ID value for query parameter.
+     */
+    private static Object convertIdForQuery(Object id, EntityReflector.IdMeta idMeta) {
+        if (idMeta.columnType() == SqlType.UUID && id instanceof String str) {
+            return UUID.fromString(str);
+        }
+        return id;
+    }
+
+    /**
+     * Populate entity fields from ResultSet.
+     */
+    private static void populateEntityFromResultSet(Object entity, ResultSet rs) throws SQLException {
+        Class<?> entityClass = entity.getClass();
+        for (Field field : getAllFields(entityClass)) {
+            Column column = field.getAnnotation(Column.class);
+            if (Objects.isNull(column)) {
+                continue;
+            }
+            String columnName = column.name().isEmpty()
+                ? Casey.toSnakeCase(field.getName())
+                : column.name();
+
+            try {
+                Object value = rs.getObject(columnName);
+                if (Objects.nonNull(value)) {
+                    value = convertValueToFieldType(value, field.getType());
+                    ReflectionUtils.setFieldValue(entity, field.getName(), value);
+                }
+            } catch (SQLException e) {
+                // Column might not exist in result set, skip
+            }
+        }
+    }
+
+    /**
+     * Convert value from ResultSet to field type.
+     */
+    private static Object convertValueToFieldType(Object value, Class<?> targetType) {
+        if (Objects.isNull(value) || targetType.isInstance(value)) {
+            return value;
+        }
+
+        if (targetType == String.class) {
+            return value.toString();
+        }
+
+        if (targetType == UUID.class && value instanceof String str) {
+            return UUID.fromString(str);
+        }
+
+        if ((targetType == Long.class || targetType == long.class) && value instanceof Number n) {
+            return n.longValue();
+        }
+
+        if ((targetType == Integer.class || targetType == int.class) && value instanceof Number n) {
+            return n.intValue();
+        }
+
+        return value;
+    }
+
+    /**
      * Get all fields for a class including inherited fields from parent classes.
+     * Traverses up the hierarchy until Object.class (exclusive).
      */
     private static Field[] getAllFields(Class<?> clazz) {
+        if (Objects.isNull(clazz) || clazz == Object.class) {
+            return new Field[0];
+        }
         List<Field> fields = new ArrayList<>();
         Class<?> current = clazz;
-        while (Objects.nonNull(current) && current != Object.class) {
+        while (current != Object.class) {
             fields.addAll(Arrays.asList(current.getDeclaredFields()));
             current = current.getSuperclass();
         }

@@ -167,7 +167,7 @@ executor.transaction(tx -> {
 
 ### Active Record Pattern
 
-Extend `SuprimEntity` to add `save()` directly on your entities:
+Extend `SuprimEntity` for full CRUD methods on your entities:
 
 ```java
 @Entity(table = "users")
@@ -184,13 +184,29 @@ public class User extends SuprimEntity {
 
 // Usage
 executor.transaction(tx -> {
+    // Create
     User user = new User();
     user.setEmail("test@example.com");
-    user.save();  // Active Record style
+    user.save();
 
-    System.out.println(user.getId());  // ID generated
+    // Update
+    user.setEmail("updated@example.com");
+    user.update();
+
+    // Refresh from DB
+    user.refresh();
+
+    // Delete
+    user.delete();
 });
 ```
+
+| Method      | Description                          |
+|-------------|--------------------------------------|
+| `save()`    | INSERT new entity, auto-generates ID |
+| `update()`  | UPDATE existing entity by ID         |
+| `delete()`  | DELETE entity by ID                  |
+| `refresh()` | Reload entity values from DB         |
 
 ## License
 
