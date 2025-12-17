@@ -213,6 +213,17 @@ public final class SelectBuilder {
     }
 
     /**
+     * Add raw SQL WHERE condition with parameters.
+     * <pre>{@code
+     * .whereRaw("email = :email", Map.of("email", "test@example.com"))
+     * }</pre>
+     */
+    public SelectBuilder whereRaw(String rawSql, java.util.Map<String, Object> params) {
+        this.whereClause = new Predicate.ParameterizedRawPredicate(rawSql, params);
+        return this;
+    }
+
+    /**
      * Add AND condition to WHERE clause.
      */
     public SelectBuilder and(Predicate predicate) {
@@ -253,6 +264,22 @@ public final class SelectBuilder {
     }
 
     /**
+     * Add raw SQL AND condition with parameters.
+     * <pre>{@code
+     * .andRaw("status = :status", Map.of("status", "active"))
+     * }</pre>
+     */
+    public SelectBuilder andRaw(String rawSql, java.util.Map<String, Object> params) {
+        Predicate rawPredicate = new Predicate.ParameterizedRawPredicate(rawSql, params);
+        if (isNull(this.whereClause)) {
+            this.whereClause = rawPredicate;
+        } else {
+            this.whereClause = this.whereClause.and(rawPredicate);
+        }
+        return this;
+    }
+
+    /**
      * Add OR condition to WHERE clause.
      */
     public SelectBuilder or(Predicate predicate) {
@@ -270,6 +297,38 @@ public final class SelectBuilder {
     public <V> SelectBuilder orIfPresent(V value, java.util.function.Supplier<Predicate> predicateSupplier) {
         if (nonNull(value)) {
             or(predicateSupplier.get());
+        }
+        return this;
+    }
+
+    /**
+     * Add raw SQL OR condition.
+     * <pre>{@code
+     * .orRaw("status = 'pending'")
+     * }</pre>
+     */
+    public SelectBuilder orRaw(String rawSql) {
+        Predicate rawPredicate = new Predicate.RawPredicate(rawSql);
+        if (isNull(this.whereClause)) {
+            this.whereClause = rawPredicate;
+        } else {
+            this.whereClause = this.whereClause.or(rawPredicate);
+        }
+        return this;
+    }
+
+    /**
+     * Add raw SQL OR condition with parameters.
+     * <pre>{@code
+     * .orRaw("status = :status", Map.of("status", "pending"))
+     * }</pre>
+     */
+    public SelectBuilder orRaw(String rawSql, Map<String, Object> params) {
+        Predicate rawPredicate = new Predicate.ParameterizedRawPredicate(rawSql, params);
+        if (isNull(this.whereClause)) {
+            this.whereClause = rawPredicate;
+        } else {
+            this.whereClause = this.whereClause.or(rawPredicate);
         }
         return this;
     }
@@ -1391,7 +1450,8 @@ public final class SelectBuilder {
      * Only adds defaults that are NOT explicitly excluded via .without().
      */
     private void mergeDefaultEagerLoads() {
-        if (Objects.isNull(fromTable) || Objects.isNull(fromTable.getEntityType())) {
+        if (Objects.isNull(fromTable) || Objects.isNull(fromTable.getEntityType())
+                || fromTable.getEntityType() == Object.class) {
             return;
         }
 

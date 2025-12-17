@@ -1,8 +1,11 @@
 package sant1ago.dev.suprim.jdbc;
 
 import sant1ago.dev.suprim.annotation.entity.Column;
+import sant1ago.dev.suprim.annotation.entity.CreationTimestamp;
 import sant1ago.dev.suprim.annotation.entity.JsonbColumn;
 import sant1ago.dev.suprim.annotation.entity.SoftDeletes;
+import sant1ago.dev.suprim.annotation.entity.TimestampAction;
+import sant1ago.dev.suprim.annotation.entity.UpdateTimestamp;
 import sant1ago.dev.suprim.annotation.type.GenerationType;
 import sant1ago.dev.suprim.annotation.type.IdGenerator;
 import sant1ago.dev.suprim.annotation.type.SqlType;
@@ -199,20 +202,46 @@ final class EntityPersistence {
 
     /**
      * Build column name to value map from entity.
+     * Automatically sets @CreatedAt and @UpdatedAt fields for insert operations.
      */
     private static Map<String, Object> buildColumnMap(Object entity, EntityReflector.IdMeta idMeta, boolean skipId) {
+        return buildColumnMap(entity, idMeta, skipId, true);
+    }
+
+    /**
+     * Build column name to value map from entity.
+     *
+     * @param entity the entity
+     * @param idMeta ID metadata
+     * @param skipId whether to skip the ID column
+     * @param isInsert true for INSERT (sets @CreatedAt), false for UPDATE
+     */
+    private static Map<String, Object> buildColumnMap(Object entity, EntityReflector.IdMeta idMeta, boolean skipId, boolean isInsert) {
         Map<String, Object> columns = new LinkedHashMap<>();
         Class<?> entityClass = entity.getClass();
+        Instant now = Instant.now();
 
         for (Field field : getAllFields(entityClass)) {
             Column column = field.getAnnotation(Column.class);
-            if (Objects.isNull(column)) {
+            boolean hasCreationTimestamp = field.isAnnotationPresent(CreationTimestamp.class);
+            boolean hasUpdateTimestamp = field.isAnnotationPresent(UpdateTimestamp.class);
+
+            // Skip fields without @Column, @CreationTimestamp, or @UpdateTimestamp
+            if (Objects.isNull(column) && !hasCreationTimestamp && !hasUpdateTimestamp) {
                 continue;
             }
 
-            String columnName = column.name().isEmpty()
-                ? Casey.toSnakeCase(field.getName())
-                : column.name();
+            // Determine column name: @Column.name > @Timestamp.column > snake_case
+            String columnName;
+            if (Objects.nonNull(column) && !column.name().isEmpty()) {
+                columnName = column.name();
+            } else if (hasCreationTimestamp) {
+                columnName = field.getAnnotation(CreationTimestamp.class).column();
+            } else if (hasUpdateTimestamp) {
+                columnName = field.getAnnotation(UpdateTimestamp.class).column();
+            } else {
+                columnName = Casey.toSnakeCase(field.getName());
+            }
 
             // Skip ID column if database will generate it
             if (skipId && columnName.equals(idMeta.columnName())) {
@@ -220,13 +249,34 @@ final class EntityPersistence {
             }
 
             Object value = ReflectionUtils.getFieldValue(entity, field.getName());
+
+            // Handle @CreationTimestamp - set on insert only based on onCreation action
+            if (isInsert && hasCreationTimestamp) {
+                CreationTimestamp creationTs = field.getAnnotation(CreationTimestamp.class);
+                TimestampAction action = creationTs.onCreation();
+                if (action == TimestampAction.NOW || (action == TimestampAction.IF_NULL && Objects.isNull(value))) {
+                    value = convertTimestampToFieldType(now, field.getType());
+                    ReflectionUtils.setFieldValue(entity, field.getName(), value);
+                }
+            }
+
+            // Handle @UpdateTimestamp - set on both insert and update based on onModification action
+            if (hasUpdateTimestamp) {
+                UpdateTimestamp updateTs = field.getAnnotation(UpdateTimestamp.class);
+                TimestampAction action = updateTs.onModification();
+                if (action == TimestampAction.NOW || (action == TimestampAction.IF_NULL && Objects.isNull(value))) {
+                    value = convertTimestampToFieldType(now, field.getType());
+                    ReflectionUtils.setFieldValue(entity, field.getName(), value);
+                }
+            }
+
             if (Objects.nonNull(value)) {
                 // Convert @JsonbColumn fields to PGobject for PostgreSQL JSONB
                 if (field.isAnnotationPresent(JsonbColumn.class)) {
                     value = EntityReflector.toJsonbObject(value);
                 }
                 // Convert String to UUID for SqlType.UUID columns
-                if (column.type() == SqlType.UUID && value instanceof String str) {
+                if (Objects.nonNull(column) && column.type() == SqlType.UUID && value instanceof String str) {
                     try {
                         value = UUID.fromString(str);
                     } catch (IllegalArgumentException e) {
@@ -443,7 +493,8 @@ final class EntityPersistence {
             );
         }
 
-        Map<String, Object> columns = buildColumnMap(entity, idMeta, true);
+        // Use isInsert=false so @CreatedAt is preserved, @UpdatedAt is set
+        Map<String, Object> columns = buildColumnMap(entity, idMeta, true, false);
         if (columns.isEmpty()) {
             return entity;
         }
@@ -611,12 +662,25 @@ final class EntityPersistence {
         Class<?> entityClass = entity.getClass();
         for (Field field : getAllFields(entityClass)) {
             Column column = field.getAnnotation(Column.class);
-            if (Objects.isNull(column)) {
+            boolean hasCreationTimestamp = field.isAnnotationPresent(CreationTimestamp.class);
+            boolean hasUpdateTimestamp = field.isAnnotationPresent(UpdateTimestamp.class);
+
+            // Skip fields without @Column, @CreationTimestamp, or @UpdateTimestamp
+            if (Objects.isNull(column) && !hasCreationTimestamp && !hasUpdateTimestamp) {
                 continue;
             }
-            String columnName = column.name().isEmpty()
-                ? Casey.toSnakeCase(field.getName())
-                : column.name();
+
+            // Determine column name
+            String columnName;
+            if (Objects.nonNull(column) && !column.name().isEmpty()) {
+                columnName = column.name();
+            } else if (hasCreationTimestamp) {
+                columnName = field.getAnnotation(CreationTimestamp.class).column();
+            } else if (hasUpdateTimestamp) {
+                columnName = field.getAnnotation(UpdateTimestamp.class).column();
+            } else {
+                columnName = Casey.toSnakeCase(field.getName());
+            }
 
             try {
                 Object value = rs.getObject(columnName);

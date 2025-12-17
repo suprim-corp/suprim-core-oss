@@ -243,6 +243,18 @@ public interface SqlDialect {
         return "CAST(" + quoteString(uuid.toString()) + " AS uuid)";
     }
 
+    /**
+     * Format UUID parameter placeholder.
+     * PostgreSQL: CAST(:paramName AS uuid)
+     * MySQL/Others: :paramName (no cast needed, stored as CHAR)
+     *
+     * @param paramName the parameter name (without colon)
+     * @return formatted parameter placeholder
+     */
+    default String formatUuidParameter(String paramName) {
+        return "CAST(:" + paramName + " AS uuid)";
+    }
+
     // ==================== ARRAY SUPPORT ====================
 
     /**

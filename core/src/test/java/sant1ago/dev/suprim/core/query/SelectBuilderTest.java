@@ -809,6 +809,43 @@ class SelectBuilderTest {
     }
 
     @Test
+    @DisplayName("whereRaw with parameters")
+    void testWhereRawWithParams() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .from(TestUser_.TABLE)
+            .whereRaw("status = :status", java.util.Map.of("status", "active"))
+            .build();
+
+        assertTrue(result.sql().contains("WHERE status ="));
+        assertTrue(result.parameters().containsValue("active"));
+    }
+
+    @Test
+    @DisplayName("andRaw with parameters")
+    void testAndRawWithParams() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .from(TestUser_.TABLE)
+            .where(TestUser_.IS_ACTIVE.eq(true))
+            .andRaw("age >= :minAge", java.util.Map.of("minAge", 18))
+            .build();
+
+        assertTrue(result.sql().contains("AND age >="));
+        assertTrue(result.parameters().containsValue(18));
+    }
+
+    @Test
+    @DisplayName("andRaw with parameters when no existing where clause")
+    void testAndRawWithParams_noExistingWhere() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .from(TestUser_.TABLE)
+            .andRaw("status = :status", java.util.Map.of("status", "pending"))
+            .build();
+
+        assertTrue(result.sql().contains("WHERE status ="));
+        assertTrue(result.parameters().containsValue("pending"));
+    }
+
+    @Test
     @DisplayName("andRaw with no existing where")
     void testAndRawNoExistingWhere() {
         QueryResult result = Suprim.select(TestUser_.ID)
@@ -2308,5 +2345,98 @@ class SelectBuilderTest {
         entityTypeField.set(table, null);
 
         return table;
+    }
+
+    // ==================== OR RAW ====================
+
+    @Test
+    @DisplayName("orRaw - first condition (no existing where)")
+    void testOrRawFirstCondition() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .from(TestUser_.TABLE)
+            .orRaw("status = 'pending'")
+            .build();
+
+        assertTrue(result.sql().contains("WHERE status = 'pending'"));
+    }
+
+    @Test
+    @DisplayName("orRaw - with existing where clause")
+    void testOrRawWithExistingWhere() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .from(TestUser_.TABLE)
+            .where(TestUser_.EMAIL.eq("test@example.com"))
+            .orRaw("status = 'pending'")
+            .build();
+
+        assertTrue(result.sql().contains("OR status = 'pending'"));
+    }
+
+    @Test
+    @DisplayName("orRaw with parameters - first condition")
+    void testOrRawWithParamsFirstCondition() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .from(TestUser_.TABLE)
+            .orRaw("status = :status", java.util.Map.of("status", "active"))
+            .build();
+
+        assertTrue(result.sql().contains("WHERE status ="));
+        assertTrue(result.parameters().containsValue("active"));
+    }
+
+    @Test
+    @DisplayName("orRaw with parameters - with existing where")
+    void testOrRawWithParamsExistingWhere() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .from(TestUser_.TABLE)
+            .where(TestUser_.EMAIL.eq("test@example.com"))
+            .orRaw("status = :status", java.util.Map.of("status", "pending"))
+            .build();
+
+        assertTrue(result.sql().contains("OR status ="));
+        assertTrue(result.parameters().containsValue("pending"));
+    }
+
+    @Test
+    @DisplayName("orRaw - multiple or conditions")
+    void testOrRawMultiple() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .from(TestUser_.TABLE)
+            .where(TestUser_.AGE.gt(18))
+            .orRaw("status = 'vip'")
+            .orRaw("role = 'admin'")
+            .build();
+
+        assertTrue(result.sql().contains("OR status = 'vip'"));
+        assertTrue(result.sql().contains("OR role = 'admin'"));
+    }
+
+    // ==================== ENTITY TYPE TESTS ====================
+
+    @Test
+    @DisplayName("getEntityType returns null when no from table set")
+    void testGetEntityTypeWithoutFromTable() {
+        SelectBuilder builder = Suprim.select(TestUser_.ID);
+        assertNull(builder.getEntityType());
+    }
+
+    @Test
+    @DisplayName("getEntityType returns entity class when from table is set")
+    void testGetEntityTypeWithFromTable() {
+        SelectBuilder builder = Suprim.select(TestUser_.ID).from(TestUser_.TABLE);
+        assertEquals(sant1ago.dev.suprim.core.TestUser.class, builder.getEntityType());
+    }
+
+    @Test
+    @DisplayName("build works with Object.class entity type (pivot tables)")
+    void testBuildWithObjectClassEntityType() {
+        // Pivot tables use Object.class as entity type - should not throw
+        Table<?> pivotTable = new Table<>("user_roles", "", Object.class);
+        QueryResult result = Suprim.select()
+            .selectRaw("*")
+            .from(pivotTable)
+            .build();
+
+        assertTrue(result.sql().contains("FROM \"user_roles\""));
     }
 }

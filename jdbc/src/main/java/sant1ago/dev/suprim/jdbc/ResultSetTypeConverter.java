@@ -2,6 +2,7 @@ package sant1ago.dev.suprim.jdbc;
 
 import sant1ago.dev.suprim.core.type.TypeUtils;
 
+import java.lang.reflect.Method;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -224,8 +225,8 @@ final class ResultSetTypeConverter {
                     return constant;
                 }
             }
-            // Exact match fallback (will throw if not found)
-            return Enum.valueOf(enumClass, s);
+            // No match found - throw with proper error message
+            throw new IllegalArgumentException("No enum constant " + enumClass.getName() + "." + s);
         }
 
         if (value instanceof Number n) {
@@ -254,8 +255,8 @@ final class ResultSetTypeConverter {
         // Handle PostgreSQL PGobject (jsonb/json types)
         if (value.getClass().getName().equals("org.postgresql.util.PGobject")) {
             try {
-                var getType = value.getClass().getMethod("getType");
-                var getValue = value.getClass().getMethod("getValue");
+                Method getType = value.getClass().getMethod("getType");
+                Method getValue = value.getClass().getMethod("getValue");
                 String pgType = (String) getType.invoke(value);
                 if ("jsonb".equals(pgType) || "json".equals(pgType)) {
                     return (String) getValue.invoke(value);
@@ -272,12 +273,12 @@ final class ResultSetTypeConverter {
     private static Object parseJson(String jsonString, Class<?> type) {
         // Try Jackson 3.x first
         try {
-            var mapperClass = Class.forName("tools.jackson.databind.json.JsonMapper");
-            var builderMethod = mapperClass.getMethod("builder");
-            var builder = builderMethod.invoke(null);
-            var buildMethod = builder.getClass().getMethod("build");
-            var mapper = buildMethod.invoke(builder);
-            var readValueMethod = mapper.getClass().getMethod("readValue", String.class, Class.class);
+            Class<?> mapperClass = Class.forName("tools.jackson.databind.json.JsonMapper");
+            Method builderMethod = mapperClass.getMethod("builder");
+            Object builder = builderMethod.invoke(null);
+            Method buildMethod = builder.getClass().getMethod("build");
+            Object mapper = buildMethod.invoke(builder);
+            Method readValueMethod = mapper.getClass().getMethod("readValue", String.class, Class.class);
             return readValueMethod.invoke(mapper, jsonString, type);
         } catch (ClassNotFoundException e) {
             // Jackson 3.x not available, try Jackson 2.x
@@ -289,9 +290,9 @@ final class ResultSetTypeConverter {
 
     private static Object parseJsonWithJackson2(String jsonString, Class<?> type) {
         try {
-            var mapperClass = Class.forName("com.fasterxml.jackson.databind.ObjectMapper");
-            var mapper = mapperClass.getDeclaredConstructor().newInstance();
-            var readValueMethod = mapperClass.getMethod("readValue", String.class, Class.class);
+            Class<?> mapperClass = Class.forName("com.fasterxml.jackson.databind.ObjectMapper");
+            Object mapper = mapperClass.getDeclaredConstructor().newInstance();
+            Method readValueMethod = mapperClass.getMethod("readValue", String.class, Class.class);
             return readValueMethod.invoke(mapper, jsonString, type);
         } catch (Exception e) {
             return null;

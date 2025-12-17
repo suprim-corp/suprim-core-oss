@@ -7,7 +7,7 @@
     <parent>
         <groupId>dev.suprim</groupId>
         <artifactId>suprim-parent</artifactId>
-        <version>0.0.5</version>
+        <version>0.0.6</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -73,12 +73,20 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Lombok for tests -->
+        <!-- Jackson 2.x for testing fallback path in ResultSetTypeConverter -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.18.2</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Lombok for @SuperBuilder support -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <version>1.18.42</version>
-            <scope>test</scope>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 

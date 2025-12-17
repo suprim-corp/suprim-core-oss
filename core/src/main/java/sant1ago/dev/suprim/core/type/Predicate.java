@@ -5,14 +5,17 @@ import sant1ago.dev.suprim.core.dialect.UnsupportedDialectFeatureException;
 import sant1ago.dev.suprim.core.query.ParameterContext;
 import sant1ago.dev.suprim.core.query.SelectBuilder;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Function;
 
 /**
  * Boolean predicate for WHERE clauses.
  * Supports composition through AND/OR/NOT operations.
  */
-public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.CompositePredicate, Predicate.NotPredicate, Predicate.RawPredicate, Predicate.RelationExistsPredicate, Predicate.RelationCountPredicate, SubqueryExpression.ExistsPredicate {
+public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.CompositePredicate, Predicate.NotPredicate, Predicate.RawPredicate, Predicate.ParameterizedRawPredicate, Predicate.RelationExistsPredicate, Predicate.RelationCountPredicate, SubqueryExpression.ExistsPredicate {
 
     /**
      * Combine with AND: this AND other
@@ -79,7 +82,7 @@ public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.C
                 }
                 case BETWEEN -> {
                     if (right instanceof ListLiteral<?> list && list.values().size() == 2) {
-                        var vals = list.values();
+                        List<?> vals = list.values();
                         String min = new Literal<>(vals.get(0), Object.class).toSql(dialect);
                         String max = new Literal<>(vals.get(1), Object.class).toSql(dialect);
                         yield leftSql + " BETWEEN " + min + " AND " + max;
@@ -135,7 +138,7 @@ public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.C
                 }
                 case BETWEEN -> {
                     if (right instanceof ListLiteral<?> list && list.values().size() == 2) {
-                        var vals = list.values();
+                        List<?> vals = list.values();
                         String min = new Literal<>(vals.get(0), Object.class).toSql(dialect, params);
                         String max = new Literal<>(vals.get(1), Object.class).toSql(dialect, params);
                         yield leftSql + " BETWEEN " + min + " AND " + max;
@@ -252,6 +255,36 @@ public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.C
     }
 
     /**
+     * Raw SQL predicate with named parameters.
+     * SQL should contain :paramName placeholders.
+     *
+     * @param sql the SQL with :paramName placeholders
+     * @param parameters map of parameter name to value
+     */
+    record ParameterizedRawPredicate(String sql, Map<String, Object> parameters) implements Predicate {
+        @Override
+        public String toSql(SqlDialect dialect) {
+            throw new UnsupportedOperationException(
+                "ParameterizedRawPredicate requires ParameterContext. Use toSql(dialect, params) instead.");
+        }
+
+        @Override
+        public String toSql(SqlDialect dialect, ParameterContext params) {
+            String result = sql;
+            for (Map.Entry<String, Object> entry : parameters.entrySet()) {
+                String oldPlaceholder = ":" + entry.getKey();
+                String newParamName = params.addParameter(entry.getValue());
+                if (entry.getValue() instanceof UUID) {
+                    result = result.replace(oldPlaceholder, dialect.formatUuidParameter(newParamName));
+                } else {
+                    result = result.replace(oldPlaceholder, ":" + newParamName);
+                }
+            }
+            return result;
+        }
+    }
+
+    /**
      * Deferred EXISTS predicate for relation queries.
      * SQL generation happens at toSql() time with the correct dialect.
      *
@@ -283,7 +316,7 @@ public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.C
 
             // Apply additional constraints with correct dialect
             if (Objects.nonNull(constraint)) {
-                SelectBuilder subBuilder = new SelectBuilder(java.util.List.of());
+                SelectBuilder subBuilder = new SelectBuilder(List.of());
                 subBuilder = constraint.apply(subBuilder);
                 Predicate whereClause = subBuilder.getWhereClause();
                 if (Objects.nonNull(whereClause)) {
@@ -330,7 +363,7 @@ public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.C
 
             // Apply additional constraints with correct dialect
             if (Objects.nonNull(constraint)) {
-                SelectBuilder subBuilder = new SelectBuilder(java.util.List.of());
+                SelectBuilder subBuilder = new SelectBuilder(List.of());
                 subBuilder = constraint.apply(subBuilder);
                 Predicate whereClause = subBuilder.getWhereClause();
                 if (Objects.nonNull(whereClause)) {
