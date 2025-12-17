@@ -314,14 +314,14 @@ Suprim.restore(User_.TABLE, "deleted_at")
     .build();
 ```
 
-| Method | Description |
-|--------|-------------|
-| `softDelete()` | Set deleted_at to current timestamp |
-| `restore()` | Set deleted_at to NULL |
-| `forceDelete()` | Permanently delete from database |
-| `isTrashed()` | Check if record is soft-deleted |
-| `withTrashed()` | Include soft-deleted in query |
-| `onlyTrashed()` | Query only soft-deleted records |
+| Method          | Description                         |
+|-----------------|-------------------------------------|
+| `softDelete()`  | Set deleted_at to current timestamp |
+| `restore()`     | Set deleted_at to NULL              |
+| `forceDelete()` | Permanently delete from database    |
+| `isTrashed()`   | Check if record is soft-deleted     |
+| `withTrashed()` | Include soft-deleted in query       |
+| `onlyTrashed()` | Query only soft-deleted records     |
 
 ## License
 
