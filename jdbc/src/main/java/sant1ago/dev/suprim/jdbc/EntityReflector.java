@@ -411,6 +411,38 @@ final class EntityReflector {
     }
 
     /**
+     * Get the SqlType for a column from @Column annotation.
+     *
+     * @param entityClass the entity class
+     * @param columnName  the database column name
+     * @return SqlType or AUTO if not found
+     */
+    static SqlType getColumnType(Class<?> entityClass, String columnName) {
+        if (Objects.isNull(entityClass) || Objects.isNull(columnName)) {
+            return SqlType.AUTO;
+        }
+
+        Field field = findFieldByColumnName(entityClass, columnName);
+        if (Objects.isNull(field)) {
+            return SqlType.AUTO;
+        }
+
+        Column column = field.getAnnotation(Column.class);
+        return Objects.nonNull(column) ? column.type() : SqlType.AUTO;
+    }
+
+    /**
+     * Check if a column is UUID type based on @Column annotation.
+     *
+     * @param entityClass the entity class
+     * @param columnName  the database column name
+     * @return true if column is annotated with SqlType.UUID
+     */
+    static boolean isUuidColumn(Class<?> entityClass, String columnName) {
+        return getColumnType(entityClass, columnName) == SqlType.UUID;
+    }
+
+    /**
      * Get field value by column name (database column name).
      *
      * @param entity     the entity instance

@@ -5,6 +5,7 @@ import sant1ago.dev.suprim.jdbc.DefaultModelRegistry;
 import sant1ago.dev.suprim.jdbc.ReflectionUtils;
 import sant1ago.dev.suprim.jdbc.exception.MappingException;
 
+import java.lang.reflect.Field;
 import java.util.*;
 
 /**
@@ -120,14 +121,19 @@ public final class RelationPopulator {
     }
 
     /**
-     * Populate a collection relation (HasMany, BelongsToMany).
+     * Populate a collection relation (HasMany).
+     * Note: BelongsToMany and Through are handled directly by EagerLoader.
      */
     private static <T, R> void populateCollection(
             List<T> parents,
             List<R> related,
             Relation<T, R> relation
     ) {
-        // Group related entities by parent key
+        String fieldName = relation.getFieldName();
+        Class<?> parentClass = parents.get(0).getClass();
+        Class<?> fieldType = determineFieldType(parentClass, fieldName);
+
+        // Group related entities by parent key (FK on related entity)
         Map<Object, List<R>> relatedByParentKey = new HashMap<>();
 
         for (R relatedEntity : related) {
@@ -136,12 +142,6 @@ public final class RelationPopulator {
                 relatedByParentKey.computeIfAbsent(parentKeyValue, k -> new ArrayList<>()).add(relatedEntity);
             }
         }
-
-        String fieldName = relation.getFieldName();
-
-        // Determine collection type from field
-        Class<?> parentClass = parents.get(0).getClass();
-        Class<?> fieldType = determineFieldType(parentClass, fieldName);
 
         // Match parents to related entities
         for (T parent : parents) {
@@ -171,7 +171,7 @@ public final class RelationPopulator {
      * Determine the field type for a given field name.
      */
     private static Class<?> determineFieldType(Class<?> clazz, String fieldName) {
-        var field = ReflectionUtils.findField(clazz, fieldName);
+        Field field = ReflectionUtils.findField(clazz, fieldName);
         if (Objects.nonNull(field)) {
             return field.getType();
         }

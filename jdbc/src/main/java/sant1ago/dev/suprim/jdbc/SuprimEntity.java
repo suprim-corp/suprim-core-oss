@@ -1,5 +1,7 @@
 package sant1ago.dev.suprim.jdbc;
 
+import lombok.NoArgsConstructor;
+import lombok.experimental.SuperBuilder;
 import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.jdbc.exception.PersistenceException;
 
@@ -40,7 +42,23 @@ import java.util.Objects;
  *   <li>A field annotated with {@code @Id} (with strategy or manual)</li>
  *   <li>Fields annotated with {@code @Column}</li>
  * </ul>
+ *
+ * <p><b>Lombok Builder Support:</b> Use {@code @SuperBuilder} on child classes:
+ * <pre>{@code
+ * @Entity(table = "users")
+ * @SuperBuilder
+ * @NoArgsConstructor
+ * public class User extends SuprimEntity {
+ *     // fields...
+ * }
+ *
+ * User user = User.builder()
+ *     .email("test@example.com")
+ *     .build();
+ * }</pre>
  */
+@SuperBuilder
+@NoArgsConstructor
 public abstract class SuprimEntity {
 
     /**

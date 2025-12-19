@@ -1,15 +1,20 @@
 package sant1ago.dev.suprim.jdbc;
 
 import sant1ago.dev.suprim.casey.Casey;
+import sant1ago.dev.suprim.jdbc.exception.MappingException;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.RecordComponent;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -299,10 +304,133 @@ public final class ReflectionUtils {
         }
 
         try {
-            setter.invoke(entity, value);
+            Object convertedValue = convertValueIfNeeded(clazz, fieldName, value);
+            setter.invoke(entity, convertedValue);
             return true;
         } catch (Throwable e) {
             return false;
+        }
+    }
+
+    /**
+     * Convert value if type conversion is needed (UUID↔String, cross-classloader).
+     */
+    private static Object convertValueIfNeeded(Class<?> clazz, String fieldName, Object value) {
+        if (Objects.isNull(value)) {
+            return null;
+        }
+
+        Field field = findField(clazz, fieldName);
+        if (Objects.isNull(field)) {
+            return value;
+        }
+
+        Class<?> fieldType = field.getType();
+        Class<?> valueType = value.getClass();
+
+        // String → UUID
+        if (fieldType == UUID.class && valueType == String.class) {
+            return UUID.fromString((String) value);
+        }
+        // UUID → String
+        if (fieldType == String.class && valueType == UUID.class) {
+            return value.toString();
+        }
+
+        // Cross-classloader conversion: same class name but different Class objects
+        if (isSameClassDifferentLoader(fieldType, valueType)) {
+            return convertCrossClassloader(value, fieldType);
+        }
+
+        return value;
+    }
+
+    /**
+     * Convert an object from one classloader to the expected type from another classloader.
+     * Creates a new instance of the target type and copies all field values.
+     * Handles enums by matching by name.
+     */
+    private static Object convertCrossClassloader(Object source, Class<?> targetType) {
+        try {
+            // Handle enums: find matching constant by name
+            if (targetType.isEnum() && source.getClass().isEnum()) {
+                return findEnumByName(targetType, ((Enum<?>) source).name());
+            }
+
+            Object target = targetType.getDeclaredConstructor().newInstance();
+
+            // Copy all fields from source to target
+            for (Field sourceField : getAllFields(source.getClass())) {
+                String fieldName = sourceField.getName();
+                Object fieldValue = getFieldValue(source, fieldName);
+                if (Objects.nonNull(fieldValue)) {
+                    setFieldValueDirect(target, fieldName, fieldValue);
+                }
+            }
+
+            return target;
+        } catch (Exception e) {
+            LOGGER.warn("Suprim: Failed to convert cross-classloader object {} to {}: {}",
+                    source.getClass().getName(), targetType.getName(), e.getMessage());
+            // Return original value - let the caller handle any ClassCastException
+            return source;
+        }
+    }
+
+    /**
+     * Find enum constant by name from target enum class.
+     */
+    private static Object findEnumByName(Class<?> enumType, String name) {
+        Object[] constants = enumType.getEnumConstants();
+        if (Objects.isNull(constants)) {
+            return null;
+        }
+        for (Object constant : constants) {
+            if (((Enum<?>) constant).name().equals(name)) {
+                return constant;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Get all fields from a class including inherited fields.
+     */
+    private static List<Field> getAllFields(Class<?> clazz) {
+        List<Field> fields = new ArrayList<>();
+        Class<?> current = clazz;
+        while (Objects.nonNull(current) && current != Object.class) {
+            for (Field field : current.getDeclaredFields()) {
+                // Skip synthetic and static fields
+                if (!field.isSynthetic() && !Modifier.isStatic(field.getModifiers())) {
+                    fields.add(field);
+                }
+            }
+            current = current.getSuperclass();
+        }
+        return fields;
+    }
+
+    /**
+     * Set field value directly using Field.set() - bypasses type checking.
+     * Used for cross-classloader field copying where types have same name.
+     */
+    private static void setFieldValueDirect(Object target, String fieldName, Object value) {
+        try {
+            Field field = findDeclaredField(target.getClass(), fieldName);
+            if (Objects.nonNull(field)) {
+                field.setAccessible(true);
+                // For nested objects with same-class-different-loader, recurse
+                Class<?> fieldType = field.getType();
+                Class<?> valueType = value.getClass();
+                if (isSameClassDifferentLoader(fieldType, valueType)) {
+                    value = convertCrossClassloader(value, fieldType);
+                }
+                field.set(target, value);
+            }
+        } catch (Exception e) {
+            // Silently skip - best effort copy
+            LOGGER.debug("Suprim: Could not copy field {} to target: {}", fieldName, e.getMessage());
         }
     }
 
@@ -337,14 +465,21 @@ public final class ReflectionUtils {
             if (method.getName().equals(setterName) && method.getParameterCount() == 1) {
                 Class<?> paramType = method.getParameterTypes()[0];
                 Class<?> valueType = Objects.isNull(value) ? null : value.getClass();
-                boolean typeMatch = Objects.isNull(value) || paramType.isAssignableFrom(valueType) || isBoxedMatch(paramType, valueType);
+
+                // Check type compatibility: null, assignable, boxed, numeric widening, UUID/String, same-class-different-loader
+                boolean typeMatch = Objects.isNull(value) ||
+                    paramType.isAssignableFrom(valueType) ||
+                    isBoxedMatch(paramType, valueType) ||
+                    isNumericWideningMatch(paramType, valueType) ||
+                    isUuidStringMatch(paramType, valueType) ||
+                    isSameClassDifferentLoader(paramType, valueType);
 
                 if (!typeMatch) {
-                    LOGGER.debug("Suprim: Type mismatch for {}.{} - paramType={}, valueType={}",
-                        clazz.getSimpleName(), setterName, paramType.getName(),
-                        valueType.getName()
-                    );
-                    continue;
+                    // Throw error on type mismatch - strict mode
+                    throw MappingException.builder()
+                        .message("Type mismatch for " + clazz.getSimpleName() + "." + setterName +
+                            " - expected: " + paramType.getName() + ", got: " + valueType.getName())
+                        .build();
                 }
 
                 try {
@@ -470,6 +605,55 @@ public final class ReflectionUtils {
                     (paramType == char.class && valueType == Character.class);
         }
         return false;
+    }
+
+    /**
+     * Check if value type can be widened to param type (numeric widening).
+     * Allows: byte→short→int→long, float→double, int→long (common DB driver variance)
+     */
+    private static boolean isNumericWideningMatch(Class<?> paramType, Class<?> valueType) {
+        // Long param accepts Integer (common: DB returns Integer, field is Long)
+        if ((paramType == Long.class || paramType == long.class) &&
+            (valueType == Integer.class || valueType == int.class)) {
+            return true;
+        }
+        // Double param accepts Float
+        if ((paramType == Double.class || paramType == double.class) &&
+            (valueType == Float.class || valueType == float.class)) {
+            return true;
+        }
+        // Integer param accepts Short/Byte
+        if ((paramType == Integer.class || paramType == int.class) &&
+            (valueType == Short.class || valueType == short.class ||
+             valueType == Byte.class || valueType == byte.class)) {
+            return true;
+        }
+        // Long param accepts Short/Byte
+        if ((paramType == Long.class || paramType == long.class) &&
+            (valueType == Short.class || valueType == short.class ||
+             valueType == Byte.class || valueType == byte.class)) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Check if types are UUID ↔ String (bidirectional conversion allowed).
+     */
+    private static boolean isUuidStringMatch(Class<?> paramType, Class<?> valueType) {
+        return (paramType == UUID.class && valueType == String.class) ||
+               (paramType == String.class && valueType == UUID.class);
+    }
+
+    /**
+     * Check if classes have the same name but were loaded by different classloaders.
+     * This happens with Spring DevTools, hot-reload, or multi-module applications.
+     */
+    private static boolean isSameClassDifferentLoader(Class<?> paramType, Class<?> valueType) {
+        if (paramType == valueType) {
+            return false; // Same class object, already handled by isAssignableFrom
+        }
+        return paramType.getName().equals(valueType.getName());
     }
 
     private static String capitalize(String str) {

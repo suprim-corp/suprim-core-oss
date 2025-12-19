@@ -5,9 +5,12 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.postgresql.util.PGobject;
 import sant1ago.dev.suprim.annotation.entity.Column;
+import sant1ago.dev.suprim.annotation.entity.CreationTimestamp;
 import sant1ago.dev.suprim.annotation.entity.Entity;
 import sant1ago.dev.suprim.annotation.entity.Id;
 import sant1ago.dev.suprim.annotation.entity.JsonbColumn;
+import sant1ago.dev.suprim.annotation.entity.TimestampAction;
+import sant1ago.dev.suprim.annotation.entity.UpdateTimestamp;
 import sant1ago.dev.suprim.annotation.type.GenerationType;
 import sant1ago.dev.suprim.annotation.type.IdGenerator;
 import sant1ago.dev.suprim.annotation.type.SqlType;
@@ -2569,6 +2572,456 @@ class EntityPersistenceTest {
             Object result = method.invoke(null, ldt, java.util.Date.class);
 
             assertInstanceOf(java.util.Date.class, result);
+        }
+    }
+
+    // ==================== TIMESTAMP ACTION TEST ENTITIES ====================
+
+    @Entity(table = "ts_default")
+    static class EntityWithDefaultTimestamps {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @CreationTimestamp  // default: IF_NULL
+        private java.time.LocalDateTime createdAt;
+
+        @UpdateTimestamp  // default: NOW
+        private java.time.LocalDateTime updatedAt;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public java.time.LocalDateTime getCreatedAt() { return createdAt; }
+        public void setCreatedAt(java.time.LocalDateTime createdAt) { this.createdAt = createdAt; }
+        public java.time.LocalDateTime getUpdatedAt() { return updatedAt; }
+        public void setUpdatedAt(java.time.LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    }
+
+    @Entity(table = "ts_now")
+    static class EntityWithNowTimestamps {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @CreationTimestamp(onCreation = TimestampAction.NOW)  // always overwrite
+        private java.time.LocalDateTime createdAt;
+
+        @UpdateTimestamp(onModification = TimestampAction.NOW)  // always overwrite (default)
+        private java.time.LocalDateTime updatedAt;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public java.time.LocalDateTime getCreatedAt() { return createdAt; }
+        public void setCreatedAt(java.time.LocalDateTime createdAt) { this.createdAt = createdAt; }
+        public java.time.LocalDateTime getUpdatedAt() { return updatedAt; }
+        public void setUpdatedAt(java.time.LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    }
+
+    @Entity(table = "ts_if_null")
+    static class EntityWithIfNullTimestamps {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @CreationTimestamp(onCreation = TimestampAction.IF_NULL)  // default
+        private java.time.LocalDateTime createdAt;
+
+        @UpdateTimestamp(onModification = TimestampAction.IF_NULL)  // set only if null
+        private java.time.LocalDateTime updatedAt;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public java.time.LocalDateTime getCreatedAt() { return createdAt; }
+        public void setCreatedAt(java.time.LocalDateTime createdAt) { this.createdAt = createdAt; }
+        public java.time.LocalDateTime getUpdatedAt() { return updatedAt; }
+        public void setUpdatedAt(java.time.LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    }
+
+    @Entity(table = "ts_never")
+    static class EntityWithNeverTimestamps {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @CreationTimestamp(onCreation = TimestampAction.NEVER)  // manual only
+        private java.time.LocalDateTime createdAt;
+
+        @UpdateTimestamp(onModification = TimestampAction.NEVER)  // manual only
+        private java.time.LocalDateTime updatedAt;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public java.time.LocalDateTime getCreatedAt() { return createdAt; }
+        public void setCreatedAt(java.time.LocalDateTime createdAt) { this.createdAt = createdAt; }
+        public java.time.LocalDateTime getUpdatedAt() { return updatedAt; }
+        public void setUpdatedAt(java.time.LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    }
+
+    @Nested
+    @DisplayName("Timestamp Action Tests")
+    class TimestampActionTests {
+
+        @Test
+        @DisplayName("CreationTimestamp IF_NULL sets timestamp when null")
+        void creationTimestamp_ifNull_setsWhenNull() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithDefaultTimestamps entity = new EntityWithDefaultTimestamps();
+            entity.setId("test-id");
+            // createdAt is null
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithDefaultTimestamps.class);
+            Map<String, Object> columns = (Map<String, Object>) buildColumnMap.invoke(null, entity, idMeta, false, true);
+
+            // Should have set createdAt
+            assertNotNull(entity.getCreatedAt());
+            assertTrue(columns.containsKey("created_at"));
+        }
+
+        @Test
+        @DisplayName("CreationTimestamp IF_NULL preserves existing value")
+        void creationTimestamp_ifNull_preservesExisting() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithDefaultTimestamps entity = new EntityWithDefaultTimestamps();
+            entity.setId("test-id");
+            java.time.LocalDateTime existingTime = java.time.LocalDateTime.of(2020, 1, 1, 12, 0);
+            entity.setCreatedAt(existingTime);
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithDefaultTimestamps.class);
+            Map<String, Object> columns = (Map<String, Object>) buildColumnMap.invoke(null, entity, idMeta, false, true);
+
+            // Should preserve the existing value
+            assertEquals(existingTime, entity.getCreatedAt());
+        }
+
+        @Test
+        @DisplayName("CreationTimestamp NOW always overwrites")
+        void creationTimestamp_now_alwaysOverwrites() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithNowTimestamps entity = new EntityWithNowTimestamps();
+            entity.setId("test-id");
+            java.time.LocalDateTime existingTime = java.time.LocalDateTime.of(2020, 1, 1, 12, 0);
+            entity.setCreatedAt(existingTime);
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithNowTimestamps.class);
+            buildColumnMap.invoke(null, entity, idMeta, false, true);
+
+            // Should have overwritten with current time
+            assertNotEquals(existingTime, entity.getCreatedAt());
+            assertTrue(entity.getCreatedAt().isAfter(existingTime));
+        }
+
+        @Test
+        @DisplayName("CreationTimestamp NEVER does not auto-set")
+        void creationTimestamp_never_doesNotAutoSet() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithNeverTimestamps entity = new EntityWithNeverTimestamps();
+            entity.setId("test-id");
+            // createdAt is null
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithNeverTimestamps.class);
+            Map<String, Object> columns = (Map<String, Object>) buildColumnMap.invoke(null, entity, idMeta, false, true);
+
+            // Should NOT have set createdAt
+            assertNull(entity.getCreatedAt());
+            assertFalse(columns.containsKey("created_at"));
+        }
+
+        @Test
+        @DisplayName("UpdateTimestamp NOW always overwrites")
+        void updateTimestamp_now_alwaysOverwrites() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithDefaultTimestamps entity = new EntityWithDefaultTimestamps();
+            entity.setId("test-id");
+            java.time.LocalDateTime existingTime = java.time.LocalDateTime.of(2020, 1, 1, 12, 0);
+            entity.setUpdatedAt(existingTime);
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithDefaultTimestamps.class);
+            buildColumnMap.invoke(null, entity, idMeta, false, true);
+
+            // Should have overwritten with current time
+            assertNotEquals(existingTime, entity.getUpdatedAt());
+            assertTrue(entity.getUpdatedAt().isAfter(existingTime));
+        }
+
+        @Test
+        @DisplayName("UpdateTimestamp IF_NULL sets timestamp when null")
+        void updateTimestamp_ifNull_setsWhenNull() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithIfNullTimestamps entity = new EntityWithIfNullTimestamps();
+            entity.setId("test-id");
+            // updatedAt is null
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithIfNullTimestamps.class);
+            Map<String, Object> columns = (Map<String, Object>) buildColumnMap.invoke(null, entity, idMeta, false, true);
+
+            // Should have set updatedAt
+            assertNotNull(entity.getUpdatedAt());
+            assertTrue(columns.containsKey("updated_at"));
+        }
+
+        @Test
+        @DisplayName("UpdateTimestamp IF_NULL preserves existing value")
+        void updateTimestamp_ifNull_preservesExisting() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithIfNullTimestamps entity = new EntityWithIfNullTimestamps();
+            entity.setId("test-id");
+            java.time.LocalDateTime existingTime = java.time.LocalDateTime.of(2020, 1, 1, 12, 0);
+            entity.setUpdatedAt(existingTime);
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithIfNullTimestamps.class);
+            buildColumnMap.invoke(null, entity, idMeta, false, true);
+
+            // Should preserve the existing value
+            assertEquals(existingTime, entity.getUpdatedAt());
+        }
+
+        @Test
+        @DisplayName("UpdateTimestamp NEVER does not auto-set")
+        void updateTimestamp_never_doesNotAutoSet() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithNeverTimestamps entity = new EntityWithNeverTimestamps();
+            entity.setId("test-id");
+            // updatedAt is null
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithNeverTimestamps.class);
+            Map<String, Object> columns = (Map<String, Object>) buildColumnMap.invoke(null, entity, idMeta, false, true);
+
+            // Should NOT have set updatedAt
+            assertNull(entity.getUpdatedAt());
+            assertFalse(columns.containsKey("updated_at"));
+        }
+
+        @Test
+        @DisplayName("CreationTimestamp not set on update (isInsert=false)")
+        void creationTimestamp_notSetOnUpdate() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithDefaultTimestamps entity = new EntityWithDefaultTimestamps();
+            entity.setId("test-id");
+            // createdAt is null
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithDefaultTimestamps.class);
+            // isInsert = false (update operation)
+            Map<String, Object> columns = (Map<String, Object>) buildColumnMap.invoke(null, entity, idMeta, false, false);
+
+            // Should NOT have set createdAt on update
+            assertNull(entity.getCreatedAt());
+        }
+
+        @Test
+        @DisplayName("UpdateTimestamp set on both insert and update")
+        void updateTimestamp_setOnBothInsertAndUpdate() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            // Test on insert
+            EntityWithDefaultTimestamps insertEntity = new EntityWithDefaultTimestamps();
+            insertEntity.setId("test-id");
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithDefaultTimestamps.class);
+            buildColumnMap.invoke(null, insertEntity, idMeta, false, true);
+            assertNotNull(insertEntity.getUpdatedAt());
+
+            // Test on update
+            EntityWithDefaultTimestamps updateEntity = new EntityWithDefaultTimestamps();
+            updateEntity.setId("test-id");
+            buildColumnMap.invoke(null, updateEntity, idMeta, false, false);
+            assertNotNull(updateEntity.getUpdatedAt());
+        }
+
+        @Test
+        @DisplayName("CreationTimestamp NEVER preserves manually set value")
+        void creationTimestamp_never_preservesManualValue() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithNeverTimestamps entity = new EntityWithNeverTimestamps();
+            entity.setId("test-id");
+            java.time.LocalDateTime manualTime = java.time.LocalDateTime.of(2020, 1, 1, 12, 0);
+            entity.setCreatedAt(manualTime);
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithNeverTimestamps.class);
+            Map<String, Object> columns = (Map<String, Object>) buildColumnMap.invoke(null, entity, idMeta, false, true);
+
+            // Should preserve the manual value (not overwrite)
+            assertEquals(manualTime, entity.getCreatedAt());
+            assertTrue(columns.containsKey("created_at"));
+        }
+
+        @Test
+        @DisplayName("UpdateTimestamp NEVER preserves manually set value")
+        void updateTimestamp_never_preservesManualValue() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithNeverTimestamps entity = new EntityWithNeverTimestamps();
+            entity.setId("test-id");
+            java.time.LocalDateTime manualTime = java.time.LocalDateTime.of(2020, 1, 1, 12, 0);
+            entity.setUpdatedAt(manualTime);
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithNeverTimestamps.class);
+            Map<String, Object> columns = (Map<String, Object>) buildColumnMap.invoke(null, entity, idMeta, false, true);
+
+            // Should preserve the manual value (not overwrite)
+            assertEquals(manualTime, entity.getUpdatedAt());
+            assertTrue(columns.containsKey("updated_at"));
+        }
+
+        @Test
+        @DisplayName("Custom column names are respected")
+        void customColumnNames_areRespected() throws Exception {
+            Method buildColumnMap = EntityPersistence.class.getDeclaredMethod(
+                "buildColumnMap", Object.class, EntityReflector.IdMeta.class, boolean.class, boolean.class);
+            buildColumnMap.setAccessible(true);
+
+            EntityWithCustomColumnTimestamps entity = new EntityWithCustomColumnTimestamps();
+            entity.setId("test-id");
+
+            EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(EntityWithCustomColumnTimestamps.class);
+            Map<String, Object> columns = (Map<String, Object>) buildColumnMap.invoke(null, entity, idMeta, false, true);
+
+            // Should use custom column names
+            assertTrue(columns.containsKey("creation_time"));
+            assertTrue(columns.containsKey("modification_time"));
+            assertFalse(columns.containsKey("created_at"));
+            assertFalse(columns.containsKey("updated_at"));
+        }
+    }
+
+    @Entity(table = "ts_custom_col")
+    static class EntityWithCustomColumnTimestamps {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @CreationTimestamp(column = "creation_time")
+        private java.time.LocalDateTime createdAt;
+
+        @UpdateTimestamp(column = "modification_time")
+        private java.time.LocalDateTime updatedAt;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public java.time.LocalDateTime getCreatedAt() { return createdAt; }
+        public void setCreatedAt(java.time.LocalDateTime createdAt) { this.createdAt = createdAt; }
+        public java.time.LocalDateTime getUpdatedAt() { return updatedAt; }
+        public void setUpdatedAt(java.time.LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    }
+
+    // ==================== ENTITY REFLECTOR EDGE CASE ENTITIES ====================
+
+    // Entity with @Table annotation (instead of @Entity table attribute)
+    @Entity
+    @sant1ago.dev.suprim.annotation.entity.Table(name = "table_annotation_test", schema = "custom_schema")
+    static class EntityWithTableAnnotation {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+    }
+
+    // Entity with ID field without @Column (snake_case fallback)
+    @Entity(table = "snake_case_id_test")
+    static class EntityWithSnakeCaseIdColumn {
+        @Id(strategy = GenerationType.UUID_V7)
+        private String myEntityId;  // Should become my_entity_id
+
+        public String getMyEntityId() { return myEntityId; }
+        public void setMyEntityId(String id) { this.myEntityId = id; }
+    }
+
+    // Entity without any table annotation (class name fallback)
+    @Entity
+    static class MyTestEntityWithNoTableName {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+    }
+
+    // Entity without @Id field (should throw exception)
+    @Entity(table = "no_id_entity")
+    static class EntityWithoutIdField {
+        @Column(name = "name")
+        private String name;
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+    }
+
+    @Nested
+    @DisplayName("EntityReflector Edge Case Tests")
+    class EntityReflectorEdgeCaseTests {
+
+        @Test
+        @DisplayName("@Table annotation fallback for table name and schema")
+        void tableAnnotation_fallback() {
+            EntityReflector.EntityMeta meta = EntityReflector.getEntityMeta(EntityWithTableAnnotation.class);
+
+            assertEquals("table_annotation_test", meta.tableName());
+            assertEquals("custom_schema", meta.schema());
+        }
+
+        @Test
+        @DisplayName("ID column uses snake_case when no @Column annotation")
+        void idColumn_snakeCaseFallback() {
+            EntityReflector.IdMeta meta = EntityReflector.getIdMeta(EntityWithSnakeCaseIdColumn.class);
+
+            assertEquals("my_entity_id", meta.columnName());
+        }
+
+        @Test
+        @DisplayName("Table name uses snake_case class name when no annotation")
+        void tableName_snakeCaseFallback() {
+            EntityReflector.EntityMeta meta = EntityReflector.getEntityMeta(MyTestEntityWithNoTableName.class);
+
+            assertEquals("my_test_entity_with_no_table_name", meta.tableName());
+        }
+
+        @Test
+        @DisplayName("getEntityMeta throws for entity without @Id")
+        void getEntityMeta_noIdField_throws() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.getEntityMeta(EntityWithoutIdField.class));
+        }
+
+        @Test
+        @DisplayName("getIdMeta throws for entity without @Id")
+        void getIdMeta_noIdField_throws() {
+            assertThrows(IllegalArgumentException.class,
+                () -> EntityReflector.getIdMeta(EntityWithoutIdField.class));
         }
     }
 }

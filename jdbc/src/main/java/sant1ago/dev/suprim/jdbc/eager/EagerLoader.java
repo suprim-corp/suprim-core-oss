@@ -12,8 +12,12 @@ import sant1ago.dev.suprim.jdbc.EntityMapper;
 import sant1ago.dev.suprim.jdbc.ReflectionUtils;
 import sant1ago.dev.suprim.jdbc.SuprimExecutor;
 
+import java.lang.reflect.Field;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static java.util.Objects.isNull;
+import static java.util.Objects.nonNull;
 
 /**
  * Loads related entities eagerly using batch queries to prevent N+1 query problems.
@@ -61,7 +65,12 @@ public final class EagerLoader {
         };
 
         // Populate relation field on parent entities
-        RelationPopulator.populate(entities, relatedEntities, relation);
+        // Skip for BelongsToMany and Through relations - they populate directly in their methods
+        if (relation.getType() != Relation.Type.BELONGS_TO_MANY
+                && relation.getType() != Relation.Type.HAS_ONE_THROUGH
+                && relation.getType() != Relation.Type.HAS_MANY_THROUGH) {
+            RelationPopulator.populate(entities, relatedEntities, relation);
+        }
 
         // Recursively load nested relations
         if (spec.hasNested() && !relatedEntities.isEmpty()) {
@@ -152,10 +161,10 @@ public final class EagerLoader {
     }
 
     /**
-     * Load BelongsToMany relation.
-     * SQL: SELECT related.*, pivot.fk FROM related
-     *      JOIN pivot ON pivot.related_key = related.id
-     *      WHERE pivot.fk IN (parent_ids)
+     * Load BelongsToMany relation (Laravel-style).
+     * Step 1: Query pivot table to get parent->related mappings
+     * Step 2: Query related entities
+     * Step 3: Store mapping for RelationPopulator to use
      */
     private <T, R> List<R> loadBelongsToMany(
             List<T> parents,
@@ -168,49 +177,110 @@ public final class EagerLoader {
             return Collections.emptyList();
         }
 
-        // Build query with pivot table join
-        Table<R> relatedTable = relation.getRelatedTable();
-
-        // SELECT related.* FROM related
-        SelectBuilder builder = Suprim.select()
-                .from(relatedTable);
-
-        // JOIN pivot ON pivot.related_pivot_key = related.related_key
-        String pivotJoin = String.format(
-                "JOIN %s ON %s.%s = %s.%s",
-                relation.getPivotTable(),
-                relation.getPivotTable(),
+        // Step 1: Query pivot table to get (foreignPivotKey, relatedPivotKey) pairs
+        // SQL: SELECT foreign_pivot_key AS FK, related_pivot_key AS RK FROM pivot WHERE foreign_pivot_key IN (...)
+        // Use uppercase aliases for cross-database compatibility
+        String pivotQuery = String.format(
+                "SELECT %s AS FK, %s AS RK FROM %s WHERE %s IN (%s)",
+                relation.getForeignPivotKey(),
                 relation.getRelatedPivotKey(),
-                relatedTable.getName(),
-                relation.getRelatedKey()
-        );
-        builder.joinRaw(pivotJoin);
-
-        // WHERE pivot.foreign_pivot_key IN (parent_ids)
-        String pivotWhereClause = String.format(
-                "%s.%s IN (%s)",
                 relation.getPivotTable(),
                 relation.getForeignPivotKey(),
-                parentKeys.stream()
-                        .map(this::formatValue)
-                        .collect(Collectors.joining(", "))
+                parentKeys.stream().map(this::formatValue).collect(Collectors.joining(", "))
         );
-        builder.whereRaw(pivotWhereClause);
 
-        // Apply constraint if provided
+        // Execute pivot query and build mapping
+        Map<Object, List<Object>> parentToRelatedKeys = new HashMap<>();
+        Set<Object> allRelatedKeys = new HashSet<>();
+
+        List<Map<String, Object>> pivotRows = executor.query(
+                new QueryResult(pivotQuery, Map.of()),
+                rs -> {
+                    Map<String, Object> row = new HashMap<>();
+                    row.put("fk", rs.getObject("FK"));
+                    row.put("rk", rs.getObject("RK"));
+                    return row;
+                }
+        );
+
+        for (Map<String, Object> row : pivotRows) {
+            Object parentKey = row.get("fk");
+            Object relatedKey = row.get("rk");
+            if (isNull(parentKey) || isNull(relatedKey)) {
+                continue;
+            }
+            parentToRelatedKeys.computeIfAbsent(parentKey, k -> new ArrayList<>()).add(relatedKey);
+            allRelatedKeys.add(relatedKey);
+        }
+
+        if (allRelatedKeys.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // Step 2: Query related entities
+        Table<R> relatedTable = relation.getRelatedTable();
+        String relatedInClause = String.format(
+                "%s IN (%s)",
+                relation.getRelatedKey(),
+                allRelatedKeys.stream().map(this::formatValue).collect(Collectors.joining(", "))
+        );
+
+        SelectBuilder builder = Suprim.select()
+                .from(relatedTable)
+                .whereRaw(relatedInClause);
+
         if (spec.hasConstraint()) {
             builder = spec.constraint().apply(builder);
         }
 
         QueryResult query = builder.build();
-        return executor.query(query, EntityMapper.of(relatedTable.getEntityType()));
+        List<R> relatedEntities = executor.query(query, EntityMapper.of(relatedTable.getEntityType()));
+
+        // Step 3: Build related entity map by key
+        Map<Object, R> relatedByKey = new HashMap<>();
+        for (R entity : relatedEntities) {
+            Object key = ReflectionUtils.getFieldValue(entity, relation.getRelatedKey());
+            if (isNull(key)) {
+                continue;
+            }
+            relatedByKey.put(key, entity);
+        }
+
+        // Step 4: Assign related to parents using pivot mapping
+        String fieldName = relation.getFieldName();
+        if (isNull(fieldName)) {
+            return Collections.emptyList();
+        }
+
+        for (T parent : parents) {
+            Object parentKey = ReflectionUtils.getFieldValue(parent, relation.getLocalKey());
+            List<Object> relatedKeys = parentToRelatedKeys.getOrDefault(parentKey, Collections.emptyList());
+
+            List<R> parentRelated = relatedKeys.stream()
+                    .map(relatedByKey::get)
+                    .filter(Objects::nonNull)
+                    .toList();
+
+            Class<?> fieldType = determineFieldType(parent.getClass(), fieldName);
+            Object collection = Set.class.isAssignableFrom(fieldType)
+                    ? new HashSet<>(parentRelated)
+                    : new ArrayList<>(parentRelated);
+            ReflectionUtils.setFieldValue(parent, fieldName, collection);
+        }
+
+        return Collections.emptyList();
+    }
+
+    private Class<?> determineFieldType(Class<?> clazz, String fieldName) {
+        Field field = ReflectionUtils.findField(clazz, fieldName);
+        return nonNull(field) ? field.getType() : List.class;
     }
 
     /**
-     * Load HasOneThrough or HasManyThrough relation.
-     * SQL: SELECT related.*, through.fk FROM related
-     *      JOIN through ON related.second_key = through.second_local_key
-     *      WHERE through.first_key IN (parent_ids)
+     * Load HasOneThrough or HasManyThrough relation (Laravel-style).
+     * Step 1: Query through table to get parent->related mappings
+     * Step 2: Query related entities
+     * Step 3: Assign to parents using mapping
      */
     private <T, R> List<R> loadThrough(
             List<T> parents,
@@ -223,43 +293,106 @@ public final class EagerLoader {
             return Collections.emptyList();
         }
 
-        // Build query with through table join
-        Table<R> relatedTable = relation.getRelatedTable();
         Table<?> throughTable = relation.getThroughTable();
+        Table<R> relatedTable = relation.getRelatedTable();
 
-        // SELECT related.* FROM related
-        SelectBuilder builder = Suprim.select()
-                .from(relatedTable);
-
-        // JOIN through ON related.second_key = through.second_local_key
-        String throughJoin = String.format(
-                "JOIN %s ON %s.%s = %s.%s",
-                throughTable.getName(),
-                relatedTable.getName(),
-                relation.getSecondKey(),
-                throughTable.getName(),
-                relation.getSecondLocalKey()
-        );
-        builder.joinRaw(throughJoin);
-
-        // WHERE through.first_key IN (parent_ids)
-        String throughWhereClause = String.format(
-                "%s.%s IN (%s)",
+        // Step 1: Query through table to get (firstKey, secondLocalKey) pairs
+        // firstKey links to parent, secondLocalKey links to related
+        // Use uppercase aliases for cross-database compatibility
+        String throughQuery = String.format(
+                "SELECT %s AS PK, %s AS RK FROM %s WHERE %s IN (%s)",
+                relation.getFirstKey(),
+                relation.getSecondLocalKey(),
                 throughTable.getName(),
                 relation.getFirstKey(),
-                parentKeys.stream()
-                        .map(this::formatValue)
-                        .collect(Collectors.joining(", "))
+                parentKeys.stream().map(this::formatValue).collect(Collectors.joining(", "))
         );
-        builder.whereRaw(throughWhereClause);
 
-        // Apply constraint if provided
+        // Execute through query and build mapping
+        Map<Object, List<Object>> parentToRelatedKeys = new HashMap<>();
+        Set<Object> allRelatedKeys = new HashSet<>();
+
+        List<Map<String, Object>> throughRows = executor.query(
+                new QueryResult(throughQuery, Map.of()),
+                rs -> {
+                    Map<String, Object> row = new HashMap<>();
+                    row.put("pk", rs.getObject("PK"));
+                    row.put("rk", rs.getObject("RK"));
+                    return row;
+                }
+        );
+
+        for (Map<String, Object> row : throughRows) {
+            Object parentKey = row.get("pk");
+            Object relatedKey = row.get("rk");
+            if (isNull(parentKey) || isNull(relatedKey)) {
+                continue;
+            }
+            parentToRelatedKeys.computeIfAbsent(parentKey, k -> new ArrayList<>()).add(relatedKey);
+            allRelatedKeys.add(relatedKey);
+        }
+
+        if (allRelatedKeys.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // Step 2: Query related entities using secondKey (FK on related table)
+        String relatedInClause = String.format(
+                "%s IN (%s)",
+                relation.getSecondKey(),
+                allRelatedKeys.stream().map(this::formatValue).collect(Collectors.joining(", "))
+        );
+
+        SelectBuilder builder = Suprim.select()
+                .from(relatedTable)
+                .whereRaw(relatedInClause);
+
         if (spec.hasConstraint()) {
             builder = spec.constraint().apply(builder);
         }
 
         QueryResult query = builder.build();
-        return executor.query(query, EntityMapper.of(relatedTable.getEntityType()));
+        List<R> relatedEntities = executor.query(query, EntityMapper.of(relatedTable.getEntityType()));
+
+        // Step 3: Build related entity map by secondKey (grouping all entities with same key)
+        Map<Object, List<R>> relatedByKey = new HashMap<>();
+        for (R entity : relatedEntities) {
+            Object key = ReflectionUtils.getFieldValue(entity, relation.getSecondKey());
+            if (isNull(key)) {
+                continue;
+            }
+            relatedByKey.computeIfAbsent(key, k -> new ArrayList<>()).add(entity);
+        }
+
+        // Step 4: Assign related to parents using through mapping
+        String fieldName = relation.getFieldName();
+        if (isNull(fieldName)) {
+            return Collections.emptyList();
+        }
+
+        boolean isToMany = relation.isToMany();
+        for (T parent : parents) {
+            Object parentKey = ReflectionUtils.getFieldValue(parent, relation.getLocalKey());
+            List<Object> throughKeys = parentToRelatedKeys.getOrDefault(parentKey, Collections.emptyList());
+
+            List<R> parentRelated = throughKeys.stream()
+                    .flatMap(tk -> relatedByKey.getOrDefault(tk, Collections.emptyList()).stream())
+                    .toList();
+
+            if (isToMany) {
+                Class<?> fieldType = determineFieldType(parent.getClass(), fieldName);
+                Object collection = Set.class.isAssignableFrom(fieldType)
+                        ? new HashSet<>(parentRelated)
+                        : new ArrayList<>(parentRelated);
+                ReflectionUtils.setFieldValue(parent, fieldName, collection);
+                continue;
+            }
+            // HasOneThrough - take first or null
+            R single = parentRelated.isEmpty() ? null : parentRelated.get(0);
+            ReflectionUtils.setFieldValue(parent, fieldName, single);
+        }
+
+        return Collections.emptyList();
     }
 
     /**

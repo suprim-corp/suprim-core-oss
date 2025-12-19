@@ -54,6 +54,12 @@ public class MySqlDialect implements SqlDialect {
     }
 
     @Override
+    public String formatUuidParameter(String paramName) {
+        // MySQL stores UUIDs as CHAR(36), no cast needed
+        return ":" + paramName;
+    }
+
+    @Override
     public String jsonExtract(String column, String key, boolean asText) {
         String op = asText ? "->>" : "->";
         return column + op + "'$." + escapeJsonKey(key) + "'";

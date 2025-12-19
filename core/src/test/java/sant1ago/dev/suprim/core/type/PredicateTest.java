@@ -858,4 +858,72 @@ class PredicateTest {
             assertEquals(65, params.getParameters().get("p1"));
         }
     }
+
+    // ==================== PARAMETERIZED RAW PREDICATE ====================
+
+    @Nested
+    @DisplayName("ParameterizedRawPredicate Tests")
+    class ParameterizedRawPredicateTests {
+
+        @Test
+        @DisplayName("toSql without params throws UnsupportedOperationException")
+        void toSql_withoutParams_throws() {
+            Predicate predicate = new Predicate.ParameterizedRawPredicate(
+                "status = :status",
+                Map.of("status", "active")
+            );
+
+            assertThrows(UnsupportedOperationException.class,
+                () -> predicate.toSql(PostgreSqlDialect.INSTANCE));
+        }
+
+        @Test
+        @DisplayName("toSql with params replaces placeholders")
+        void toSql_withParams_replacesPlaceholders() {
+            ParameterContext params = new ParameterContext();
+            Predicate predicate = new Predicate.ParameterizedRawPredicate(
+                "status = :status AND count > :count",
+                Map.of("status", "active", "count", 10)
+            );
+
+            String sql = predicate.toSql(PostgreSqlDialect.INSTANCE, params);
+
+            assertTrue(sql.contains(":p"));
+            assertEquals(2, params.getParameters().size());
+        }
+
+        @Test
+        @DisplayName("toSql with UUID parameter uses dialect formatting")
+        void toSql_withUuidParam_usesDialectFormatting() {
+            ParameterContext params = new ParameterContext();
+            java.util.UUID uuid = java.util.UUID.randomUUID();
+            Predicate predicate = new Predicate.ParameterizedRawPredicate(
+                "id = :id",
+                Map.of("id", uuid)
+            );
+
+            String sql = predicate.toSql(PostgreSqlDialect.INSTANCE, params);
+
+            // PostgreSQL formats UUID parameters
+            assertTrue(sql.contains(":p1") || sql.contains("CAST"));
+            assertEquals(uuid, params.getParameters().get("p1"));
+        }
+
+        @Test
+        @DisplayName("toSql with multiple parameters")
+        void toSql_withMultipleParams() {
+            ParameterContext params = new ParameterContext();
+            Predicate predicate = new Predicate.ParameterizedRawPredicate(
+                "name LIKE :name AND age >= :minAge AND age <= :maxAge",
+                Map.of("name", "%John%", "minAge", 18, "maxAge", 65)
+            );
+
+            String sql = predicate.toSql(PostgreSqlDialect.INSTANCE, params);
+
+            assertEquals(3, params.getParameters().size());
+            assertTrue(params.getParameters().containsValue("%John%"));
+            assertTrue(params.getParameters().containsValue(18));
+            assertTrue(params.getParameters().containsValue(65));
+        }
+    }
 }

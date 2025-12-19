@@ -1033,6 +1033,39 @@ public final class SuprimExecutor {
         return queryOneRequired(queryResult, EntityMapper.of(entityClass));
     }
 
+    // ==================== FLUENT FINDER API ====================
+
+    /**
+     * Start a fluent query builder for an entity class.
+     *
+     * <p>Provides a Laravel Eloquent-style API for querying:
+     * <pre>{@code
+     * // Find all with eager loading and sorting
+     * List<User> users = executor.find(User.class)
+     *     .with("posts", "comments")
+     *     .orderBy("created_at", "desc")
+     *     .limit(10)
+     *     .get();
+     *
+     * // Find first matching
+     * Optional<User> user = executor.find(User.class)
+     *     .where("email", "test@example.com")
+     *     .first();
+     *
+     * // Cursor pagination
+     * CursorResult<User> result = executor.find(User.class)
+     *     .orderBy("id")
+     *     .cursor(null, 10);
+     * }</pre>
+     *
+     * @param entityClass the entity class to query
+     * @param <T>         the entity type
+     * @return a Finder for building and executing the query
+     */
+    public <T> Finder<T> find(Class<T> entityClass) {
+        return new Finder<>(this, entityClass);
+    }
+
     /**
      * Find an entity by its primary key ID.
      * Uses reflection to extract table name and ID column from entity annotations.

@@ -1,8 +1,10 @@
 package sant1ago.dev.suprim.jdbc;
 
+import sant1ago.dev.suprim.core.query.InsertBuilder;
 import sant1ago.dev.suprim.core.query.QueryResult;
 import sant1ago.dev.suprim.core.query.SelectBuilder;
 import sant1ago.dev.suprim.core.query.Suprim;
+import sant1ago.dev.suprim.core.query.UpdateBuilder;
 import sant1ago.dev.suprim.core.type.Column;
 import sant1ago.dev.suprim.core.type.Relation;
 import sant1ago.dev.suprim.core.type.Table;
@@ -125,7 +127,7 @@ public final class RelationshipManager {
         Map<String, Object> columnMap = EntityReflector.toColumnMap(child);
 
         // Build INSERT query
-        var insertBuilder = Suprim.insertInto(relation.getRelatedTable());
+        InsertBuilder insertBuilder = Suprim.insertInto(relation.getRelatedTable());
         for (Map.Entry<String, Object> entry : columnMap.entrySet()) {
             insertBuilder.column(
                     createColumn(relation.getRelatedTable(), entry.getKey(), Object.class),
@@ -178,7 +180,7 @@ public final class RelationshipManager {
         Object parentId = EntityReflector.getId(parent);
 
         // Build INSERT query with attributes + FK
-        var insertBuilder = Suprim.insertInto(relation.getRelatedTable());
+        InsertBuilder insertBuilder = Suprim.insertInto(relation.getRelatedTable());
 
         // Add provided attributes
         for (Map.Entry<String, Object> entry : attributes.entrySet()) {
@@ -236,7 +238,7 @@ public final class RelationshipManager {
         Table<?> pivotTable = new Table<>(relation.getPivotTable(), "", Object.class);
 
         // Build INSERT query
-        var insertBuilder = Suprim.insertInto(pivotTable)
+        InsertBuilder insertBuilder = Suprim.insertInto(pivotTable)
                 .column(createColumn(pivotTable, relation.getForeignPivotKey(), Object.class), parentId)
                 .column(createColumn(pivotTable, relation.getRelatedPivotKey(), Object.class), relatedId);
 
@@ -437,7 +439,7 @@ public final class RelationshipManager {
         Table<?> pivotTable = new Table<>(relation.getPivotTable(), "", Object.class);
 
         // Build UPDATE query
-        var updateBuilder = Suprim.update(pivotTable);
+        UpdateBuilder updateBuilder = Suprim.update(pivotTable);
 
         // Set attributes
         for (Map.Entry<String, Object> entry : attributes.entrySet()) {
@@ -583,7 +585,7 @@ public final class RelationshipManager {
             Object entityId = EntityReflector.getId(existing);
             Table<R> relatedTable = relation.getRelatedTable();
 
-            var updateBuilder = Suprim.update(relatedTable);
+            UpdateBuilder updateBuilder = Suprim.update(relatedTable);
             for (Map.Entry<String, Object> entry : values.entrySet()) {
                 updateBuilder.set(
                         createColumn(relatedTable, entry.getKey(), Object.class),
@@ -655,7 +657,7 @@ public final class RelationshipManager {
         Table<R> relatedTable = relation.getRelatedTable();
 
         // Build base SELECT to get IDs matching constraint
-        var selectBuilder = Suprim.select(createColumn(relatedTable, "id", Object.class))
+        SelectBuilder selectBuilder = Suprim.select(createColumn(relatedTable, "id", Object.class))
                 .from(relatedTable)
                 .where(createColumn(relatedTable, relation.getForeignKey(), Object.class).eq(parentId));
 
@@ -711,7 +713,7 @@ public final class RelationshipManager {
         }
 
         Instant now = Instant.now();
-        var updateBuilder = Suprim.update(parentTable);
+        UpdateBuilder updateBuilder = Suprim.update(parentTable);
 
         // Set each touch column to current timestamp
         for (String columnName : touchColumns) {
@@ -736,7 +738,7 @@ public final class RelationshipManager {
         Table<R> relatedTable = relation.getRelatedTable();
 
         // Build SELECT query
-        var selectBuilder = Suprim.selectAll()
+        SelectBuilder selectBuilder = Suprim.selectAll()
                 .from(relatedTable)
                 .where(createColumn(relatedTable, relation.getForeignKey(), Object.class).eq(parentId));
 
