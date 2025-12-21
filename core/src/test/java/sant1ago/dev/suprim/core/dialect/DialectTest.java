@@ -377,4 +377,19 @@ class DialectTest {
         );
         assertEquals("DISTINCT ON", ex.getFeature());
     }
+
+    // ==================== CURRENT TIMESTAMP FUNCTION ====================
+
+    @Test
+    void testCurrentTimestampFunctionDefault() {
+        // Default implementation returns NOW()
+        SqlDialect dialect = PostgreSqlDialect.INSTANCE;
+        assertEquals("NOW()", dialect.currentTimestampFunction());
+    }
+
+    @Test
+    void testCurrentTimestampFunctionMySql() {
+        SqlDialect dialect = MySqlDialect.INSTANCE;
+        assertEquals("NOW()", dialect.currentTimestampFunction());
+    }
 }

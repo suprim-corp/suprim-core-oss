@@ -2439,4 +2439,171 @@ class SelectBuilderTest {
 
         assertTrue(result.sql().contains("FROM \"user_roles\""));
     }
+
+    // ==================== HAVING RAW TESTS ====================
+
+    @Test
+    @DisplayName("havingRaw adds raw HAVING clause")
+    void testHavingRaw() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .selectRaw("COUNT(*) as cnt")
+            .from(TestUser_.TABLE)
+            .groupBy(TestUser_.EMAIL)
+            .havingRaw("COUNT(*) > 5")
+            .build();
+
+        assertTrue(result.sql().contains("HAVING COUNT(*) > 5"));
+    }
+
+    @Test
+    @DisplayName("havingRaw with parameters")
+    void testHavingRawWithParams() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .selectRaw("COUNT(*) as cnt")
+            .from(TestUser_.TABLE)
+            .groupBy(TestUser_.EMAIL)
+            .havingRaw("COUNT(*) > :minCount", java.util.Map.of("minCount", 10))
+            .build();
+
+        assertTrue(result.sql().contains("HAVING COUNT(*) >"));
+        // Parameter is renamed to :p1 by ParameterContext
+        assertTrue(result.parameters().containsValue(10));
+    }
+
+    @Test
+    @DisplayName("orHavingRaw adds OR HAVING clause")
+    void testOrHavingRaw() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .selectRaw("COUNT(*) as cnt, AVG(age) as avg_age")
+            .from(TestUser_.TABLE)
+            .groupBy(TestUser_.EMAIL)
+            .havingRaw("COUNT(*) > 5")
+            .orHavingRaw("AVG(age) > 30")
+            .build();
+
+        assertTrue(result.sql().contains("HAVING"));
+        assertTrue(result.sql().contains("COUNT(*) > 5"));
+        assertTrue(result.sql().contains("OR"));
+        assertTrue(result.sql().contains("AVG(age) > 30"));
+    }
+
+    @Test
+    @DisplayName("orHavingRaw with parameters")
+    void testOrHavingRawWithParams() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .selectRaw("COUNT(*) as cnt")
+            .from(TestUser_.TABLE)
+            .groupBy(TestUser_.EMAIL)
+            .havingRaw("COUNT(*) > :min", java.util.Map.of("min", 5))
+            .orHavingRaw("COUNT(*) = :exact", java.util.Map.of("exact", 1))
+            .build();
+
+        assertTrue(result.sql().contains("HAVING"));
+        assertTrue(result.sql().contains("OR"));
+        // Parameters are renamed by ParameterContext
+        assertTrue(result.parameters().containsValue(5));
+        assertTrue(result.parameters().containsValue(1));
+    }
+
+    @Test
+    @DisplayName("multiple havingRaw calls are ANDed together")
+    void testMultipleHavingRaw() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .selectRaw("COUNT(*) as cnt")
+            .from(TestUser_.TABLE)
+            .groupBy(TestUser_.EMAIL)
+            .havingRaw("COUNT(*) > 5")
+            .havingRaw("COUNT(*) < 100")
+            .build();
+
+        assertTrue(result.sql().contains("HAVING"));
+        assertTrue(result.sql().contains("COUNT(*) > 5"));
+        assertTrue(result.sql().contains("AND"));
+        assertTrue(result.sql().contains("COUNT(*) < 100"));
+    }
+
+    @Test
+    @DisplayName("multiple havingRaw with params calls are ANDed together")
+    void testMultipleHavingRawWithParams() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .selectRaw("COUNT(*) as cnt")
+            .from(TestUser_.TABLE)
+            .groupBy(TestUser_.EMAIL)
+            .havingRaw("COUNT(*) > :min", java.util.Map.of("min", 5))
+            .havingRaw("COUNT(*) < :max", java.util.Map.of("max", 100))
+            .build();
+
+        assertTrue(result.sql().contains("HAVING"));
+        assertTrue(result.sql().contains("AND"));
+        assertTrue(result.parameters().containsValue(5));
+        assertTrue(result.parameters().containsValue(100));
+    }
+
+    @Test
+    @DisplayName("orHavingRaw as first HAVING clause")
+    void testOrHavingRawAsFirstClause() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .selectRaw("COUNT(*) as cnt")
+            .from(TestUser_.TABLE)
+            .groupBy(TestUser_.EMAIL)
+            .orHavingRaw("COUNT(*) > 5")  // First HAVING - should still work
+            .build();
+
+        assertTrue(result.sql().contains("HAVING COUNT(*) > 5"));
+    }
+
+    @Test
+    @DisplayName("orHavingRaw with params as first HAVING clause")
+    void testOrHavingRawWithParamsAsFirstClause() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .selectRaw("COUNT(*) as cnt")
+            .from(TestUser_.TABLE)
+            .groupBy(TestUser_.EMAIL)
+            .orHavingRaw("COUNT(*) > :min", java.util.Map.of("min", 10))  // First HAVING with params
+            .build();
+
+        assertTrue(result.sql().contains("HAVING COUNT(*) >"));
+        assertTrue(result.parameters().containsValue(10));
+    }
+
+    // ==================== CLEAR ORDERS TESTS ====================
+
+    @Test
+    @DisplayName("clearOrders removes all ORDER BY clauses")
+    void testClearOrders() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .from(TestUser_.TABLE)
+            .orderBy(TestUser_.EMAIL.asc())
+            .orderBy(TestUser_.AGE.desc())
+            .clearOrders()
+            .build();
+
+        assertFalse(result.sql().contains("ORDER BY"));
+    }
+
+    @Test
+    @DisplayName("clearOrders allows setting new orders after clearing")
+    void testClearOrdersThenNewOrder() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .from(TestUser_.TABLE)
+            .orderBy(TestUser_.EMAIL.asc())
+            .clearOrders()
+            .orderBy(TestUser_.AGE.desc())
+            .build();
+
+        assertTrue(result.sql().contains("ORDER BY"));
+        assertTrue(result.sql().contains("\"age\" DESC"));
+        assertFalse(result.sql().contains("\"email\""));
+    }
+
+    @Test
+    @DisplayName("clearOrders on builder with no orders does nothing")
+    void testClearOrdersNoOp() {
+        QueryResult result = Suprim.select(TestUser_.ID)
+            .from(TestUser_.TABLE)
+            .clearOrders()
+            .build();
+
+        assertFalse(result.sql().contains("ORDER BY"));
+    }
 }

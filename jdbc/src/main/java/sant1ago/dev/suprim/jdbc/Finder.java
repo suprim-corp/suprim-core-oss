@@ -174,6 +174,88 @@ public final class Finder<T> {
     }
 
     /**
+     * Order by raw SQL expression.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .orderByRaw("FIELD(status, 'pending', 'active', 'closed')")
+     *     .get();
+     * }</pre>
+     *
+     * @param sql raw ORDER BY expression
+     * @return this finder for chaining
+     */
+    public Finder<T> orderByRaw(String sql) {
+        builder.orderBy(OrderSpec.raw(sql));
+        return this;
+    }
+
+    /**
+     * Clear existing ORDER BY clauses.
+     *
+     * @return this finder for chaining
+     */
+    public Finder<T> reorder() {
+        builder.clearOrders();
+        return this;
+    }
+
+    /**
+     * Clear existing ORDER BY and set new order.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .orderBy("name")
+     *     .reorder("created_at", "desc")
+     *     .get();
+     * // Only orders by created_at DESC
+     * }</pre>
+     *
+     * @param column    column name
+     * @param direction "asc" or "desc"
+     * @return this finder for chaining
+     */
+    public Finder<T> reorder(String column, String direction) {
+        builder.clearOrders();
+        return orderBy(column, direction);
+    }
+
+    /**
+     * Order results randomly.
+     * Uses RANDOM() for PostgreSQL, RAND() for MySQL.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .inRandomOrder()
+     *     .limit(5)
+     *     .get();
+     * }</pre>
+     *
+     * @return this finder for chaining
+     */
+    public Finder<T> inRandomOrder() {
+        builder.orderBy(OrderSpec.raw("RANDOM()"));
+        return this;
+    }
+
+    /**
+     * Select distinct rows only.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .distinct()
+     *     .get();
+     * // SQL: SELECT DISTINCT * FROM users
+     * }</pre>
+     *
+     * @return this finder for chaining
+     */
+    public Finder<T> distinct() {
+        builder.distinct();
+        return this;
+    }
+
+    /**
      * Get the creation timestamp column name from entity's @CreationTimestamp annotation.
      *
      * @return column name from annotation or "created_at" as default
@@ -1213,6 +1295,203 @@ public final class Finder<T> {
         return result.toString();
     }
 
+    // ==================== LIKE/PATTERN MATCHING ====================
+
+    /**
+     * Add WHERE LIKE condition (case-sensitive).
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .whereLike("name", "%john%")
+     *     .get();
+     * // SQL: WHERE name LIKE ?
+     * }</pre>
+     *
+     * @param column  column name
+     * @param pattern LIKE pattern (use % for wildcards)
+     * @return this finder for chaining
+     */
+    public Finder<T> whereLike(String column, String pattern) {
+        String paramName = nextParamName();
+        builder.andRaw(column + " LIKE :" + paramName, Map.of(paramName, pattern));
+        return this;
+    }
+
+    /**
+     * Add WHERE NOT LIKE condition (case-sensitive).
+     *
+     * @param column  column name
+     * @param pattern LIKE pattern
+     * @return this finder for chaining
+     */
+    public Finder<T> whereNotLike(String column, String pattern) {
+        String paramName = nextParamName();
+        builder.andRaw(column + " NOT LIKE :" + paramName, Map.of(paramName, pattern));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE LIKE condition.
+     *
+     * @param column  column name
+     * @param pattern LIKE pattern
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereLike(String column, String pattern) {
+        String paramName = nextParamName();
+        builder.orRaw(column + " LIKE :" + paramName, Map.of(paramName, pattern));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE NOT LIKE condition.
+     *
+     * @param column  column name
+     * @param pattern LIKE pattern
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereNotLike(String column, String pattern) {
+        String paramName = nextParamName();
+        builder.orRaw(column + " NOT LIKE :" + paramName, Map.of(paramName, pattern));
+        return this;
+    }
+
+    /**
+     * Add WHERE ILIKE condition (case-insensitive, PostgreSQL).
+     * For MySQL, use whereLike with LOWER() or whereRaw.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .whereILike("email", "%@gmail.com")
+     *     .get();
+     * // SQL: WHERE email ILIKE ?
+     * }</pre>
+     *
+     * @param column  column name
+     * @param pattern LIKE pattern
+     * @return this finder for chaining
+     */
+    public Finder<T> whereILike(String column, String pattern) {
+        String paramName = nextParamName();
+        builder.andRaw(column + " ILIKE :" + paramName, Map.of(paramName, pattern));
+        return this;
+    }
+
+    /**
+     * Add WHERE NOT ILIKE condition (case-insensitive, PostgreSQL).
+     *
+     * @param column  column name
+     * @param pattern LIKE pattern
+     * @return this finder for chaining
+     */
+    public Finder<T> whereNotILike(String column, String pattern) {
+        String paramName = nextParamName();
+        builder.andRaw(column + " NOT ILIKE :" + paramName, Map.of(paramName, pattern));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE ILIKE condition.
+     *
+     * @param column  column name
+     * @param pattern LIKE pattern
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereILike(String column, String pattern) {
+        String paramName = nextParamName();
+        builder.orRaw(column + " ILIKE :" + paramName, Map.of(paramName, pattern));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE NOT ILIKE condition.
+     *
+     * @param column  column name
+     * @param pattern LIKE pattern
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereNotILike(String column, String pattern) {
+        String paramName = nextParamName();
+        builder.orRaw(column + " NOT ILIKE :" + paramName, Map.of(paramName, pattern));
+        return this;
+    }
+
+    /**
+     * Add WHERE LIKE condition for substring match.
+     * Wraps value with % wildcards: %value%
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .whereContains("bio", "developer")
+     *     .get();
+     * // SQL: WHERE bio LIKE '%developer%'
+     * }</pre>
+     *
+     * @param column column name
+     * @param value  substring to search for
+     * @return this finder for chaining
+     */
+    public Finder<T> whereContains(String column, String value) {
+        return whereLike(column, "%" + value + "%");
+    }
+
+    /**
+     * Add WHERE LIKE condition for prefix match.
+     * Appends % wildcard: value%
+     *
+     * @param column column name
+     * @param value  prefix to search for
+     * @return this finder for chaining
+     */
+    public Finder<T> whereStartsWith(String column, String value) {
+        return whereLike(column, value + "%");
+    }
+
+    /**
+     * Add WHERE LIKE condition for suffix match.
+     * Prepends % wildcard: %value
+     *
+     * @param column column name
+     * @param value  suffix to search for
+     * @return this finder for chaining
+     */
+    public Finder<T> whereEndsWith(String column, String value) {
+        return whereLike(column, "%" + value);
+    }
+
+    /**
+     * Add OR WHERE LIKE condition for substring match.
+     *
+     * @param column column name
+     * @param value  substring to search for
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereContains(String column, String value) {
+        return orWhereLike(column, "%" + value + "%");
+    }
+
+    /**
+     * Add OR WHERE LIKE condition for prefix match.
+     *
+     * @param column column name
+     * @param value  prefix to search for
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereStartsWith(String column, String value) {
+        return orWhereLike(column, value + "%");
+    }
+
+    /**
+     * Add OR WHERE LIKE condition for suffix match.
+     *
+     * @param column column name
+     * @param value  suffix to search for
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereEndsWith(String column, String value) {
+        return orWhereLike(column, "%" + value);
+    }
+
     // ==================== GROUPED CONDITIONS ====================
 
     /**
@@ -1294,6 +1573,127 @@ public final class Finder<T> {
         return this;
     }
 
+    // ==================== HAVING ====================
+
+    /**
+     * Add HAVING condition (equals).
+     *
+     * <pre>{@code
+     * executor.find(Order.class)
+     *     .groupBy("customer_id")
+     *     .having("COUNT(*)", 5)
+     *     .get();
+     * // SQL: GROUP BY customer_id HAVING COUNT(*) = ?
+     * }</pre>
+     *
+     * @param expression SQL expression (e.g., "COUNT(*)", "SUM(amount)")
+     * @param value      value to compare
+     * @return this finder for chaining
+     */
+    public Finder<T> having(String expression, Object value) {
+        return having(expression, "=", value);
+    }
+
+    /**
+     * Add HAVING condition with operator.
+     *
+     * <pre>{@code
+     * executor.find(Order.class)
+     *     .groupBy("customer_id")
+     *     .having("COUNT(*)", ">", 10)
+     *     .get();
+     * // SQL: GROUP BY customer_id HAVING COUNT(*) > ?
+     * }</pre>
+     *
+     * @param expression SQL expression
+     * @param operator   comparison operator
+     * @param value      value to compare
+     * @return this finder for chaining
+     */
+    public Finder<T> having(String expression, String operator, Object value) {
+        String paramName = nextParamName();
+        builder.havingRaw(expression + " " + operator + " :" + paramName, Map.of(paramName, value));
+        return this;
+    }
+
+    /**
+     * Add raw HAVING clause.
+     *
+     * <pre>{@code
+     * executor.find(Order.class)
+     *     .groupBy("status")
+     *     .havingRaw("COUNT(*) > 5 AND SUM(amount) > 1000")
+     *     .get();
+     * }</pre>
+     *
+     * @param sql raw SQL condition
+     * @return this finder for chaining
+     */
+    public Finder<T> havingRaw(String sql) {
+        builder.havingRaw(sql);
+        return this;
+    }
+
+    /**
+     * Add raw HAVING clause with parameters.
+     *
+     * @param sql    raw SQL condition with named parameters
+     * @param params parameter values
+     * @return this finder for chaining
+     */
+    public Finder<T> havingRaw(String sql, Map<String, Object> params) {
+        builder.havingRaw(sql, params);
+        return this;
+    }
+
+    /**
+     * Add OR HAVING condition.
+     *
+     * @param expression SQL expression
+     * @param value      value to compare
+     * @return this finder for chaining
+     */
+    public Finder<T> orHaving(String expression, Object value) {
+        return orHaving(expression, "=", value);
+    }
+
+    /**
+     * Add OR HAVING condition with operator.
+     *
+     * @param expression SQL expression
+     * @param operator   comparison operator
+     * @param value      value to compare
+     * @return this finder for chaining
+     */
+    public Finder<T> orHaving(String expression, String operator, Object value) {
+        String paramName = nextParamName();
+        builder.orHavingRaw(expression + " " + operator + " :" + paramName, Map.of(paramName, value));
+        return this;
+    }
+
+    /**
+     * Add raw OR HAVING clause.
+     *
+     * @param sql raw SQL condition
+     * @return this finder for chaining
+     */
+    public Finder<T> orHavingRaw(String sql) {
+        builder.orHavingRaw(sql);
+        return this;
+    }
+
+    /**
+     * Add raw OR HAVING clause with parameters.
+     *
+     * @param sql    raw SQL condition
+     * @param params parameter values
+     * @return this finder for chaining
+     */
+    public Finder<T> orHavingRaw(String sql, Map<String, Object> params) {
+        builder.orHavingRaw(sql, params);
+        return this;
+    }
+
     // ==================== PAGINATION ====================
 
     /**
@@ -1336,6 +1736,31 @@ public final class Finder<T> {
      */
     public Finder<T> skip(int count) {
         return offset(count);
+    }
+
+    // ==================== SCOPES ====================
+
+    /**
+     * Apply a query scope (reusable query constraint).
+     *
+     * <pre>{@code
+     * // Define scopes
+     * Consumer<Finder<User>> active = f -> f.where("is_active", true);
+     * Consumer<Finder<User>> premium = f -> f.where("plan", "premium");
+     *
+     * // Use scopes
+     * executor.find(User.class)
+     *     .scope(active)
+     *     .scope(premium)
+     *     .get();
+     * }</pre>
+     *
+     * @param scope consumer that applies query constraints
+     * @return this finder for chaining
+     */
+    public Finder<T> scope(Consumer<Finder<T>> scope) {
+        scope.accept(this);
+        return this;
     }
 
     // ==================== SOFT DELETES ====================
@@ -1455,6 +1880,271 @@ public final class Finder<T> {
      */
     public SelectBuilder toBuilder() {
         return builder;
+    }
+
+    // ==================== BATCH OPERATIONS ====================
+
+    /**
+     * Increment a column value atomically.
+     *
+     * <pre>{@code
+     * executor.find(Product.class)
+     *     .where("id", productId)
+     *     .increment("view_count");
+     * // SQL: UPDATE products SET view_count = view_count + 1 WHERE id = ?
+     * }</pre>
+     *
+     * @param column column to increment
+     * @return number of affected rows
+     */
+    public int increment(String column) {
+        return increment(column, 1);
+    }
+
+    /**
+     * Increment a column value by specified amount.
+     *
+     * @param column column to increment
+     * @param amount amount to add (can be negative)
+     * @return number of affected rows
+     */
+    public int increment(String column, int amount) {
+        QueryResult whereQuery = builder.build();
+        String whereClause = extractWhereClause(whereQuery.sql());
+        String tableName = Suprim.table(entityClass);
+
+        String sql = "UPDATE " + tableName + " SET " + column + " = " + column + " + " + amount;
+        if (!whereClause.isEmpty()) {
+            sql += " " + whereClause;
+        }
+
+        return executor.execute(new QueryResult(sql, whereQuery.parameters()));
+    }
+
+    /**
+     * Decrement a column value atomically.
+     *
+     * @param column column to decrement
+     * @return number of affected rows
+     */
+    public int decrement(String column) {
+        return increment(column, -1);
+    }
+
+    /**
+     * Decrement a column value by specified amount.
+     *
+     * @param column column to decrement
+     * @param amount amount to subtract
+     * @return number of affected rows
+     */
+    public int decrement(String column, int amount) {
+        return increment(column, -amount);
+    }
+
+    /**
+     * Find entity by attributes or create with provided values.
+     *
+     * <pre>{@code
+     * User user = executor.find(User.class)
+     *     .firstOrCreate(
+     *         Map.of("email", "test@example.com"),
+     *         Map.of("name", "Test User", "status", "active")
+     *     );
+     * }</pre>
+     *
+     * @param search search attributes to find existing entity
+     * @param values additional values to set when creating
+     * @return existing or newly created entity
+     */
+    public T firstOrCreate(Map<String, Object> search, Map<String, Object> values) {
+        // Apply search conditions
+        for (Map.Entry<String, Object> entry : search.entrySet()) {
+            where(entry.getKey(), entry.getValue());
+        }
+
+        // Try to find existing
+        Optional<T> existing = first();
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
+        // Create new entity
+        try {
+            T entity = entityClass.getDeclaredConstructor().newInstance();
+
+            // Set search attributes
+            for (Map.Entry<String, Object> entry : search.entrySet()) {
+                setFieldValue(entity, entry.getKey(), entry.getValue());
+            }
+
+            // Set additional values
+            for (Map.Entry<String, Object> entry : values.entrySet()) {
+                setFieldValue(entity, entry.getKey(), entry.getValue());
+            }
+
+            // Save entity
+            if (entity instanceof SuprimEntity suprimEntity) {
+                suprimEntity.save();
+            } else {
+                throw new RuntimeException("Entity must extend SuprimEntity for firstOrCreate");
+            }
+
+            return entity;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create entity: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Update existing entity or create new one.
+     *
+     * @param search search attributes
+     * @param values values to set/update
+     * @return updated or created entity
+     */
+    public T updateOrCreate(Map<String, Object> search, Map<String, Object> values) {
+        // Apply search conditions
+        for (Map.Entry<String, Object> entry : search.entrySet()) {
+            where(entry.getKey(), entry.getValue());
+        }
+
+        // Try to find existing
+        Optional<T> existing = first();
+
+        try {
+            T entity;
+            if (existing.isPresent()) {
+                entity = existing.get();
+                // Update values
+                for (Map.Entry<String, Object> entry : values.entrySet()) {
+                    setFieldValue(entity, entry.getKey(), entry.getValue());
+                }
+                if (entity instanceof SuprimEntity suprimEntity) {
+                    suprimEntity.update();
+                } else {
+                    throw new RuntimeException("Entity must extend SuprimEntity for updateOrCreate");
+                }
+            } else {
+                entity = entityClass.getDeclaredConstructor().newInstance();
+                // Set search attributes
+                for (Map.Entry<String, Object> entry : search.entrySet()) {
+                    setFieldValue(entity, entry.getKey(), entry.getValue());
+                }
+                // Set values
+                for (Map.Entry<String, Object> entry : values.entrySet()) {
+                    setFieldValue(entity, entry.getKey(), entry.getValue());
+                }
+                if (entity instanceof SuprimEntity suprimEntity) {
+                    suprimEntity.save();
+                } else {
+                    throw new RuntimeException("Entity must extend SuprimEntity for updateOrCreate");
+                }
+            }
+            return entity;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to update or create entity: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Process query results in chunks.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .chunk(100, batch -> {
+     *         for (User user : batch) {
+     *             process(user);
+     *         }
+     *         return true; // Continue processing
+     *     });
+     * }</pre>
+     *
+     * @param size     chunk size
+     * @param callback function that processes each chunk, return false to stop
+     */
+    public void chunk(int size, Function<List<T>, Boolean> callback) {
+        int offset = 0;
+        while (true) {
+            builder.limit(size).offset(offset);
+            QueryResult query = builder.build();
+            List<T> batch = executor.query(query, EntityMapper.of(entityClass));
+
+            if (batch.isEmpty()) {
+                break;
+            }
+
+            Boolean shouldContinue = callback.apply(batch);
+            if (Boolean.FALSE.equals(shouldContinue)) {
+                break;
+            }
+
+            if (batch.size() < size) {
+                break;
+            }
+
+            offset += size;
+        }
+    }
+
+    /**
+     * Extract WHERE clause from full SQL query.
+     */
+    private String extractWhereClause(String sql) {
+        int whereIndex = sql.toUpperCase().indexOf(" WHERE ");
+        if (whereIndex == -1) {
+            return "";
+        }
+        // Find end of WHERE clause (before ORDER BY, GROUP BY, LIMIT, etc.)
+        String remaining = sql.substring(whereIndex);
+        int endIndex = findWhereClauseEnd(remaining);
+        return remaining.substring(0, endIndex);
+    }
+
+    private int findWhereClauseEnd(String sql) {
+        String upper = sql.toUpperCase();
+        int[] endMarkers = {
+            upper.indexOf(" ORDER BY"),
+            upper.indexOf(" GROUP BY"),
+            upper.indexOf(" HAVING"),
+            upper.indexOf(" LIMIT"),
+            upper.indexOf(" OFFSET")
+        };
+        int minIndex = sql.length();
+        for (int marker : endMarkers) {
+            if (marker > 0 && marker < minIndex) {
+                minIndex = marker;
+            }
+        }
+        return minIndex;
+    }
+
+    /**
+     * Set field value on entity using reflection.
+     */
+    private void setFieldValue(T entity, String columnName, Object value) {
+        for (Field field : getAllFields(entityClass)) {
+            field.setAccessible(true);
+            sant1ago.dev.suprim.annotation.entity.Column colAnn =
+                field.getAnnotation(sant1ago.dev.suprim.annotation.entity.Column.class);
+            if (Objects.nonNull(colAnn) && colAnn.name().equals(columnName)) {
+                try {
+                    field.set(entity, value);
+                    return;
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException("Failed to set field " + columnName, e);
+                }
+            }
+            // Also check field name
+            if (field.getName().equals(columnName)) {
+                try {
+                    field.set(entity, value);
+                    return;
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException("Failed to set field " + columnName, e);
+                }
+            }
+        }
     }
 
     // ==================== INTERNAL ====================

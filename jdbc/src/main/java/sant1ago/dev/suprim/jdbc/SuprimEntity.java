@@ -2,11 +2,18 @@ package sant1ago.dev.suprim.jdbc;
 
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
+import sant1ago.dev.suprim.annotation.entity.Column;
+import sant1ago.dev.suprim.annotation.entity.Id;
 import sant1ago.dev.suprim.core.dialect.SqlDialect;
 import sant1ago.dev.suprim.jdbc.exception.PersistenceException;
 
+import java.lang.reflect.Field;
 import java.sql.Connection;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Abstract base class enabling Active Record pattern.
@@ -198,6 +205,128 @@ public abstract class SuprimEntity {
             });
         }
         return this;
+    }
+
+    // ==================== Active Record Enhancements ====================
+
+    /**
+     * Create a copy of this entity without the ID.
+     * Useful for duplicating records.
+     *
+     * <pre>{@code
+     * User original = executor.findById(User.class, id);
+     * User copy = original.replicate();
+     * copy.setEmail("new@email.com");
+     * copy.save();  // Inserts as new record
+     * }</pre>
+     *
+     * @return copy of entity with ID set to null
+     */
+    @SuppressWarnings("unchecked")
+    public <T extends SuprimEntity> T replicate() {
+        try {
+            T copy = (T) this.getClass().getDeclaredConstructor().newInstance();
+
+            // Copy all fields except ID
+            for (Field field : getAllFields(this.getClass())) {
+                field.setAccessible(true);
+
+                // Skip ID fields
+                if (field.isAnnotationPresent(Id.class)) {
+                    continue;
+                }
+
+                Object value = field.get(this);
+                field.set(copy, value);
+            }
+
+            return copy;
+        } catch (Exception e) {
+            throw new PersistenceException("Failed to replicate entity: " + e.getMessage(), this.getClass());
+        }
+    }
+
+    /**
+     * Create a copy of this entity, excluding specified fields.
+     *
+     * @param except field names to exclude from copy
+     * @return copy of entity
+     */
+    @SuppressWarnings("unchecked")
+    public <T extends SuprimEntity> T replicate(String... except) {
+        try {
+            T copy = (T) this.getClass().getDeclaredConstructor().newInstance();
+            Set<String> excludeSet = Set.of(except);
+
+            for (Field field : getAllFields(this.getClass())) {
+                field.setAccessible(true);
+
+                // Skip ID fields
+                if (field.isAnnotationPresent(Id.class)) {
+                    continue;
+                }
+
+                // Skip excluded fields
+                if (excludeSet.contains(field.getName())) {
+                    continue;
+                }
+
+                // Check column annotation for column name match
+                Column colAnn = field.getAnnotation(Column.class);
+                if (Objects.nonNull(colAnn) && excludeSet.contains(colAnn.name())) {
+                    continue;
+                }
+
+                Object value = field.get(this);
+                field.set(copy, value);
+            }
+
+            return copy;
+        } catch (Exception e) {
+            throw new PersistenceException("Failed to replicate entity: " + e.getMessage(), this.getClass());
+        }
+    }
+
+    /**
+     * Update the updated_at timestamp to current time.
+     *
+     * <pre>{@code
+     * user.touch();  // Updates updated_at to NOW()
+     * }</pre>
+     *
+     * @return this entity
+     */
+    public SuprimEntity touch() {
+        if (SuprimContext.hasContext()) {
+            Connection connection = SuprimContext.getConnection();
+            SqlDialect dialect = SuprimContext.getDialect();
+            EntityPersistence.touch(this, connection, dialect);
+        } else {
+            SuprimExecutor executor = SuprimContext.getGlobalExecutor();
+            if (Objects.isNull(executor)) {
+                throw new IllegalStateException(
+                    "No active transaction context and no global executor registered."
+                );
+            }
+            executor.executeAutoCommit((conn, dialect) -> {
+                EntityPersistence.touch(this, conn, dialect);
+                return null;
+            });
+        }
+        return this;
+    }
+
+    /**
+     * Get all fields including inherited ones.
+     */
+    private static Field[] getAllFields(Class<?> clazz) {
+        List<Field> fields = new ArrayList<>();
+        Class<?> current = clazz;
+        while (current != Object.class) {
+            fields.addAll(Arrays.asList(current.getDeclaredFields()));
+            current = current.getSuperclass();
+        }
+        return fields.toArray(new Field[0]);
     }
 
     // ==================== Soft Delete Methods ====================
