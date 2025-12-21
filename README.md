@@ -118,6 +118,12 @@ Suprim.select(User_.ID, Fn.now().as("current_time"))
 Suprim.insertInto(User_.TABLE)
     .column(User_.CREATED_AT, Fn.now())
     .build(dialect);
+
+// BETWEEN query examples
+executor.find(User.class)
+    .whereBetween("age", 18, 65)           // Find users with age between 18 and 65
+    .whereNotBetween("salary", 0, 1000)    // Exclude users with salary between 0-1000
+    .get();
 ```
 
 ### ID Generation

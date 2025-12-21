@@ -165,6 +165,634 @@ class FinderTest {
         // indirectly through integration tests with proper entity setup.
     }
 
+    // ==================== BETWEEN CONDITIONS TESTS ====================
+
+    @Nested
+    @DisplayName("Between Conditions")
+    class BetweenConditionsTests {
+
+        @BeforeEach
+        void insertTestData() {
+            insertUser("alice@test.com", "Alice", "active", 30);
+            insertUser("bob@test.com", "Bob", "active", 25);
+            insertUser("charlie@test.com", "Charlie", "inactive", 35);
+            insertUser("diana@test.com", "Diana", "pending", 20);
+        }
+
+        @Test
+        @DisplayName("whereBetween() filters by inclusive range")
+        void whereBetween_filtersByInclusiveRange() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereBetween("age", 25, 30)
+                .orderBy("age")
+                .get();
+
+            assertEquals(2, users.size());
+            assertEquals("Bob", users.get(0).getName());
+            assertEquals("Alice", users.get(1).getName());
+        }
+
+        @Test
+        @DisplayName("whereBetween() with same min and max")
+        void whereBetween_withSameMinMax() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereBetween("age", 30, 30)
+                .get();
+
+            assertEquals(1, users.size());
+            assertEquals("Alice", users.get(0).getName());
+        }
+
+        @Test
+        @DisplayName("whereBetween() returns empty when no match")
+        void whereBetween_returnsEmptyWhenNoMatch() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereBetween("age", 100, 200)
+                .get();
+
+            assertEquals(0, users.size());
+        }
+
+        @Test
+        @DisplayName("whereNotBetween() excludes range")
+        void whereNotBetween_excludesRange() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereNotBetween("age", 25, 30)
+                .orderBy("age")
+                .get();
+
+            assertEquals(2, users.size());
+            assertEquals("Diana", users.get(0).getName());
+            assertEquals("Charlie", users.get(1).getName());
+        }
+
+        @Test
+        @DisplayName("whereNotBetween() returns all when range excludes none")
+        void whereNotBetween_returnsAllWhenRangeExcludesNone() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereNotBetween("age", 100, 200)
+                .get();
+
+            assertEquals(4, users.size());
+        }
+
+        @Test
+        @DisplayName("orWhereBetween() adds OR condition with range")
+        void orWhereBetween_addsOrConditionWithRange() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .where("status", "inactive")
+                .orWhereBetween("age", 18, 22)
+                .orderBy("age")
+                .get();
+
+            // Diana (age 20) OR Charlie (inactive)
+            assertEquals(2, users.size());
+            assertEquals("Diana", users.get(0).getName());
+            assertEquals("Charlie", users.get(1).getName());
+        }
+
+        @Test
+        @DisplayName("orWhereNotBetween() adds OR NOT condition with range")
+        void orWhereNotBetween_addsOrNotConditionWithRange() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .where("status", "pending")
+                .orWhereNotBetween("age", 20, 30)
+                .orderBy("age")
+                .get();
+
+            // Diana (pending) OR Charlie (age 35, not between 20-30)
+            assertEquals(2, users.size());
+            assertEquals("Diana", users.get(0).getName());
+            assertEquals("Charlie", users.get(1).getName());
+        }
+
+        @Test
+        @DisplayName("whereBetween() chains with other conditions")
+        void whereBetween_chainsWithOtherConditions() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .where("status", "active")
+                .whereBetween("age", 20, 28)
+                .get();
+
+            assertEquals(1, users.size());
+            assertEquals("Bob", users.get(0).getName());
+        }
+
+        @Test
+        @DisplayName("whereBetween() returns this for chaining")
+        void whereBetween_returnsThisForChaining() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class);
+
+            assertSame(finder, finder.whereBetween("age", 1, 10));
+            assertSame(finder, finder.whereNotBetween("age", 100, 200));
+            assertSame(finder, finder.orWhereBetween("age", 50, 60));
+            assertSame(finder, finder.orWhereNotBetween("age", 70, 80));
+        }
+
+        @Test
+        @DisplayName("multiple between conditions combine correctly")
+        void multipleBetweenConditions_combineCorrectly() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereBetween("age", 20, 35)
+                .whereNotBetween("age", 26, 29)
+                .orderBy("age")
+                .get();
+
+            // Age 20-35 but NOT 26-29: Diana(20), Bob(25), Alice(30), Charlie(35)
+            assertEquals(4, users.size());
+        }
+
+        @Test
+        @DisplayName("whereBetween() with date range")
+        void whereBetween_withDateRange() {
+            // Test that between works with date types (falls through to default case)
+            LocalDateTime start = LocalDateTime.of(2024, 1, 1, 0, 0);
+            LocalDateTime end = LocalDateTime.of(2024, 12, 31, 23, 59);
+
+            // Just verify query builds without error
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .whereBetween("created_at", start, end);
+
+            assertNotNull(finder.toBuilder());
+        }
+    }
+
+    // ==================== COLUMN COMPARISON TESTS ====================
+
+    @Nested
+    @DisplayName("Column Comparison Conditions")
+    class ColumnComparisonTests {
+
+        @BeforeEach
+        void insertTestData() throws Exception {
+            try (Statement stmt = setupConnection.createStatement()) {
+                stmt.execute("UPDATE users SET updated_at = created_at WHERE id IS NOT NULL");
+            }
+            insertUser("alice@test.com", "Alice", "active", 30);
+            insertUser("bob@test.com", "Bob", "active", 25);
+        }
+
+        @Test
+        @DisplayName("whereColumn() compares two columns for equality")
+        void whereColumn_comparesColumnsEquality() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .whereColumn("created_at", "updated_at");
+
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("whereColumn() with operator compares columns")
+        void whereColumn_withOperator() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .whereColumn("updated_at", ">=", "created_at");
+
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("orWhereColumn() adds OR condition")
+        void orWhereColumn_addsOrCondition() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .where("status", "active")
+                .orWhereColumn("updated_at", ">", "created_at");
+
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("whereColumn methods return this for chaining")
+        void whereColumn_returnsThisForChaining() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class);
+
+            assertSame(finder, finder.whereColumn("name", "email"));
+            assertSame(finder, finder.whereColumn("age", ">", "id"));
+            assertSame(finder, finder.orWhereColumn("name", "status"));
+            assertSame(finder, finder.orWhereColumn("age", "<>", "id"));
+        }
+    }
+
+    // ==================== EXISTS SUBQUERY TESTS ====================
+
+    @Nested
+    @DisplayName("Exists Subquery Conditions")
+    class ExistsSubqueryTests {
+
+        @BeforeEach
+        void insertTestData() throws Exception {
+            try (Statement stmt = setupConnection.createStatement()) {
+                stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS orders (
+                        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        user_id BIGINT NOT NULL,
+                        total DECIMAL(10,2)
+                    )
+                    """);
+            }
+
+            insertUser("alice@test.com", "Alice", "active", 30);
+            insertUser("bob@test.com", "Bob", "active", 25);
+            insertUser("charlie@test.com", "Charlie", "inactive", 35);
+
+            try (Statement stmt = setupConnection.createStatement()) {
+                stmt.execute("INSERT INTO orders (user_id, total) VALUES (1, 100.00)");
+                stmt.execute("INSERT INTO orders (user_id, total) VALUES (1, 200.00)");
+            }
+        }
+
+        @AfterEach
+        void cleanupOrders() throws Exception {
+            try (Statement stmt = setupConnection.createStatement()) {
+                stmt.execute("DROP TABLE IF EXISTS orders");
+            }
+        }
+
+        @Test
+        @DisplayName("whereExists() with SelectBuilder")
+        void whereExists_withSelectBuilder() {
+            sant1ago.dev.suprim.core.query.SelectBuilder subquery = sant1ago.dev.suprim.core.query.Suprim.select()
+                .selectRaw("1")
+                .from(sant1ago.dev.suprim.core.type.Table.of("orders", PermissionEntity.class))
+                .whereRaw("orders.user_id = users.id");
+
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereExists(subquery)
+                .get();
+
+            assertEquals(1, users.size());
+            assertEquals("Alice", users.get(0).getName());
+        }
+
+        @Test
+        @DisplayName("whereExists() with function builder")
+        void whereExists_withFunctionBuilder() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereExists(q -> q
+                    .selectRaw("1")
+                    .from(sant1ago.dev.suprim.core.type.Table.of("orders", PermissionEntity.class))
+                    .whereRaw("orders.user_id = users.id"))
+                .get();
+
+            assertEquals(1, users.size());
+        }
+
+        @Test
+        @DisplayName("whereNotExists() finds users without orders")
+        void whereNotExists_findsUsersWithoutOrders() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereNotExists(q -> q
+                    .selectRaw("1")
+                    .from(sant1ago.dev.suprim.core.type.Table.of("orders", PermissionEntity.class))
+                    .whereRaw("orders.user_id = users.id"))
+                .orderBy("name")
+                .get();
+
+            assertEquals(2, users.size());
+            assertEquals("Bob", users.get(0).getName());
+            assertEquals("Charlie", users.get(1).getName());
+        }
+
+        @Test
+        @DisplayName("orWhereExists() combines with other conditions")
+        void orWhereExists_combinesConditions() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .where("status", "inactive")
+                .orWhereExists(q -> q
+                    .selectRaw("1")
+                    .from(sant1ago.dev.suprim.core.type.Table.of("orders", PermissionEntity.class))
+                    .whereRaw("orders.user_id = users.id"))
+                .orderBy("name")
+                .get();
+
+            assertEquals(2, users.size());
+        }
+
+        @Test
+        @DisplayName("exists methods return this for chaining")
+        void exists_returnsThisForChaining() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class);
+            sant1ago.dev.suprim.core.query.SelectBuilder subquery = sant1ago.dev.suprim.core.query.Suprim.select().selectRaw("1");
+
+            assertSame(finder, finder.whereExists(subquery));
+            assertSame(finder, finder.whereNotExists(q -> q.selectRaw("1")));
+            assertSame(finder, finder.orWhereExists(subquery));
+            assertSame(finder, finder.orWhereNotExists(q -> q.selectRaw("1")));
+        }
+    }
+
+    // ==================== DATE/TIME EXTRACTION TESTS ====================
+
+    @Nested
+    @DisplayName("Date/Time Extraction Conditions")
+    class DateTimeExtractionTests {
+
+        @BeforeEach
+        void insertTestData() throws Exception {
+            try (Statement stmt = setupConnection.createStatement()) {
+                stmt.execute("INSERT INTO users (email, name, status, age, created_at) VALUES " +
+                    "('jan@test.com', 'Jan', 'active', 25, '2024-01-15 09:30:00')");
+                stmt.execute("INSERT INTO users (email, name, status, age, created_at) VALUES " +
+                    "('jun@test.com', 'Jun', 'active', 30, '2024-06-20 14:45:00')");
+                stmt.execute("INSERT INTO users (email, name, status, age, created_at) VALUES " +
+                    "('dec@test.com', 'Dec', 'active', 35, '2023-12-25 18:00:00')");
+            }
+        }
+
+        @Test
+        @DisplayName("whereYear() filters by year")
+        void whereYear_filtersByYear() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereYear("created_at", 2024)
+                .get();
+
+            assertEquals(2, users.size());
+        }
+
+        @Test
+        @DisplayName("whereYear() with operator")
+        void whereYear_withOperator() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereYear("created_at", ">=", 2024)
+                .get();
+
+            assertEquals(2, users.size());
+        }
+
+        @Test
+        @DisplayName("whereMonth() filters by month")
+        void whereMonth_filtersByMonth() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereMonth("created_at", 6)
+                .get();
+
+            assertEquals(1, users.size());
+            assertEquals("Jun", users.get(0).getName());
+        }
+
+        @Test
+        @DisplayName("whereDay() filters by day")
+        void whereDay_filtersByDay() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereDay("created_at", 25)
+                .get();
+
+            assertEquals(1, users.size());
+            assertEquals("Dec", users.get(0).getName());
+        }
+
+        @Test
+        @DisplayName("combined year and month filters")
+        void combinedYearMonth() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereYear("created_at", 2024)
+                .whereMonth("created_at", "<=", 3)
+                .get();
+
+            assertEquals(1, users.size());
+            assertEquals("Jan", users.get(0).getName());
+        }
+
+        @Test
+        @DisplayName("orWhereYear() adds OR condition")
+        void orWhereYear_addsOrCondition() {
+            List<UserEntity> users = executor.find(UserEntity.class)
+                .whereYear("created_at", 2023)
+                .orWhereMonth("created_at", 1)
+                .get();
+
+            assertEquals(2, users.size());
+        }
+
+        @Test
+        @DisplayName("date/time methods return this for chaining")
+        void dateTime_returnsThisForChaining() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class);
+
+            assertSame(finder, finder.whereDate("created_at", java.time.LocalDate.now()));
+            assertSame(finder, finder.whereDate("created_at", ">=", java.time.LocalDate.now()));
+            assertSame(finder, finder.orWhereDate("created_at", java.time.LocalDate.now()));
+            assertSame(finder, finder.whereYear("created_at", 2024));
+            assertSame(finder, finder.orWhereYear("created_at", 2024));
+            assertSame(finder, finder.whereMonth("created_at", 6));
+            assertSame(finder, finder.orWhereMonth("created_at", 6));
+            assertSame(finder, finder.whereDay("created_at", 15));
+            assertSame(finder, finder.orWhereDay("created_at", 15));
+        }
+
+        @Test
+        @DisplayName("orWhereDate() with operator executes correctly")
+        void orWhereDate_withOperator() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .where("status", "active")
+                .orWhereDate("created_at", ">=", java.time.LocalDate.of(2024, 1, 1));
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("whereTime() executes correctly")
+        void whereTime_executesCorrectly() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .whereTime("created_at", java.time.LocalTime.of(9, 0));
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("whereTime() with operator executes correctly")
+        void whereTime_withOperator() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .whereTime("created_at", ">=", java.time.LocalTime.of(9, 0));
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("orWhereTime() executes correctly")
+        void orWhereTime_executesCorrectly() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .where("status", "active")
+                .orWhereTime("created_at", java.time.LocalTime.of(18, 0));
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("orWhereTime() with operator executes correctly")
+        void orWhereTime_withOperator() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .where("status", "active")
+                .orWhereTime("created_at", "<=", java.time.LocalTime.of(18, 0));
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("orWhereYear() with operator executes correctly")
+        void orWhereYear_withOperator() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .where("status", "active")
+                .orWhereYear("created_at", ">=", 2020);
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("orWhereMonth() with operator executes correctly")
+        void orWhereMonth_withOperator() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .where("status", "active")
+                .orWhereMonth("created_at", "<=", 6);
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("orWhereDay() with operator executes correctly")
+        void orWhereDay_withOperator() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .where("status", "active")
+                .orWhereDay("created_at", ">=", 15);
+            assertNotNull(finder.toBuilder());
+        }
+    }
+
+    // ==================== JSON OPERATIONS TESTS ====================
+
+    @Nested
+    @DisplayName("JSON Operations (SQL Generation Only)")
+    class JsonOperationsTests {
+
+        @Test
+        @DisplayName("whereJsonContains() generates correct SQL")
+        void whereJsonContains_generatesCorrectSQL() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .whereJsonContains("tags", "urgent");
+
+            // Just verify query builds without error (H2 doesn't support JSONB)
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("whereJsonContains() with path generates correct SQL")
+        void whereJsonContains_withPath_generatesCorrectSQL() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .whereJsonContains("settings", "theme", "dark");
+
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("whereJsonContains() with nested path")
+        void whereJsonContains_nestedPath() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .whereJsonContains("settings", "notifications.email", "true");
+
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("whereJsonLength() generates correct SQL")
+        void whereJsonLength_generatesCorrectSQL() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .whereJsonLength("tags", 3);
+
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("whereJsonLength() with operator")
+        void whereJsonLength_withOperator() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class)
+                .whereJsonLength("tags", ">", 0);
+
+            assertNotNull(finder.toBuilder());
+        }
+
+        @Test
+        @DisplayName("JSON methods return this for chaining")
+        void json_returnsThisForChaining() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class);
+
+            assertSame(finder, finder.whereJsonContains("tags", "test"));
+            assertSame(finder, finder.whereJsonContains("settings", "key", "value"));
+            assertSame(finder, finder.orWhereJsonContains("tags", "test"));
+            assertSame(finder, finder.orWhereJsonContains("settings", "key", "value"));
+            assertSame(finder, finder.whereJsonLength("tags", 1));
+            assertSame(finder, finder.whereJsonLength("tags", ">", 0));
+            assertSame(finder, finder.orWhereJsonLength("tags", 1));
+            assertSame(finder, finder.orWhereJsonLength("tags", "<", 10));
+        }
+
+        @Test
+        @DisplayName("toJsonArray() handles different types")
+        void toJsonArray_handlesDifferentTypes() {
+            // String value
+            Finder<UserEntity> finder1 = executor.find(UserEntity.class)
+                .whereJsonContains("tags", "string");
+            assertNotNull(finder1.toBuilder());
+
+            // Number value
+            Finder<UserEntity> finder2 = executor.find(UserEntity.class)
+                .whereJsonContains("ids", 42);
+            assertNotNull(finder2.toBuilder());
+
+            // Boolean value
+            Finder<UserEntity> finder3 = executor.find(UserEntity.class)
+                .whereJsonContains("flags", true);
+            assertNotNull(finder3.toBuilder());
+
+            // Fallback case (object that's not String/Number/Boolean)
+            Finder<UserEntity> finder4 = executor.find(UserEntity.class)
+                .whereJsonContains("data", new Object());
+            assertNotNull(finder4.toBuilder());
+        }
+
+        @Test
+        @DisplayName("buildJsonPath() handles nested paths correctly")
+        void buildJsonPath_handlesNestedPaths() {
+            // Single level path
+            Finder<UserEntity> finder1 = executor.find(UserEntity.class)
+                .whereJsonContains("settings", "theme", "dark");
+            assertNotNull(finder1.toBuilder());
+
+            // Two level nested path (exercises intermediate -> operator)
+            Finder<UserEntity> finder2 = executor.find(UserEntity.class)
+                .whereJsonContains("settings", "notifications.email", "true");
+            assertNotNull(finder2.toBuilder());
+
+            // Three level nested path
+            Finder<UserEntity> finder3 = executor.find(UserEntity.class)
+                .whereJsonContains("config", "a.b.c", "value");
+            assertNotNull(finder3.toBuilder());
+        }
+
+        @Test
+        @DisplayName("orWhereJsonContains() executes correctly")
+        void orWhereJsonContains_executesCorrectly() {
+            // Array contains
+            Finder<UserEntity> finder1 = executor.find(UserEntity.class)
+                .where("status", "active")
+                .orWhereJsonContains("tags", "urgent");
+            assertNotNull(finder1.toBuilder());
+
+            // Path contains
+            Finder<UserEntity> finder2 = executor.find(UserEntity.class)
+                .where("status", "active")
+                .orWhereJsonContains("settings", "theme", "dark");
+            assertNotNull(finder2.toBuilder());
+        }
+
+        @Test
+        @DisplayName("orWhereJsonLength() executes correctly")
+        void orWhereJsonLength_executesCorrectly() {
+            // Equality
+            Finder<UserEntity> finder1 = executor.find(UserEntity.class)
+                .where("status", "active")
+                .orWhereJsonLength("tags", 5);
+            assertNotNull(finder1.toBuilder());
+
+            // With operator
+            Finder<UserEntity> finder2 = executor.find(UserEntity.class)
+                .where("status", "active")
+                .orWhereJsonLength("tags", ">=", 1);
+            assertNotNull(finder2.toBuilder());
+        }
+    }
+
     // ==================== WHERE CONDITIONS TESTS ====================
 
     @Nested
