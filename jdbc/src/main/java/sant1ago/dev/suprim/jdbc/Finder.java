@@ -570,6 +570,649 @@ public final class Finder<T> {
         return this;
     }
 
+    // ==================== BETWEEN CONDITIONS ====================
+
+    /**
+     * Add WHERE BETWEEN condition.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .whereBetween("age", 18, 65)
+     *     .get();
+     * // SQL: WHERE age BETWEEN ? AND ?
+     * }</pre>
+     *
+     * @param column column name
+     * @param min    minimum value (inclusive)
+     * @param max    maximum value (inclusive)
+     * @return this finder for chaining
+     */
+    public Finder<T> whereBetween(String column, Object min, Object max) {
+        String minParam = nextParamName();
+        String maxParam = nextParamName();
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put(minParam, normalizeValue(column, min));
+        params.put(maxParam, normalizeValue(column, max));
+        builder.andRaw(column + " BETWEEN :" + minParam + " AND :" + maxParam, params);
+        return this;
+    }
+
+    /**
+     * Add WHERE NOT BETWEEN condition.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .whereNotBetween("age", 0, 17)
+     *     .get();
+     * // SQL: WHERE age NOT BETWEEN ? AND ?
+     * }</pre>
+     *
+     * @param column column name
+     * @param min    minimum value (inclusive)
+     * @param max    maximum value (inclusive)
+     * @return this finder for chaining
+     */
+    public Finder<T> whereNotBetween(String column, Object min, Object max) {
+        String minParam = nextParamName();
+        String maxParam = nextParamName();
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put(minParam, normalizeValue(column, min));
+        params.put(maxParam, normalizeValue(column, max));
+        builder.andRaw(column + " NOT BETWEEN :" + minParam + " AND :" + maxParam, params);
+        return this;
+    }
+
+    /**
+     * Add OR WHERE BETWEEN condition.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .where("status", "active")
+     *     .orWhereBetween("age", 18, 25)
+     *     .get();
+     * // SQL: WHERE status = ? OR age BETWEEN ? AND ?
+     * }</pre>
+     *
+     * @param column column name
+     * @param min    minimum value (inclusive)
+     * @param max    maximum value (inclusive)
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereBetween(String column, Object min, Object max) {
+        String minParam = nextParamName();
+        String maxParam = nextParamName();
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put(minParam, normalizeValue(column, min));
+        params.put(maxParam, normalizeValue(column, max));
+        builder.orRaw(column + " BETWEEN :" + minParam + " AND :" + maxParam, params);
+        return this;
+    }
+
+    /**
+     * Add OR WHERE NOT BETWEEN condition.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .where("status", "active")
+     *     .orWhereNotBetween("age", 0, 17)
+     *     .get();
+     * // SQL: WHERE status = ? OR age NOT BETWEEN ? AND ?
+     * }</pre>
+     *
+     * @param column column name
+     * @param min    minimum value (inclusive)
+     * @param max    maximum value (inclusive)
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereNotBetween(String column, Object min, Object max) {
+        String minParam = nextParamName();
+        String maxParam = nextParamName();
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put(minParam, normalizeValue(column, min));
+        params.put(maxParam, normalizeValue(column, max));
+        builder.orRaw(column + " NOT BETWEEN :" + minParam + " AND :" + maxParam, params);
+        return this;
+    }
+
+    // ==================== COLUMN COMPARISON ====================
+
+    /**
+     * Add WHERE condition comparing two columns (equality).
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .whereColumn("first_name", "last_name")
+     *     .get();
+     * // SQL: WHERE first_name = last_name
+     * }</pre>
+     *
+     * @param first  first column name
+     * @param second second column name
+     * @return this finder for chaining
+     */
+    public Finder<T> whereColumn(String first, String second) {
+        return whereColumn(first, "=", second);
+    }
+
+    /**
+     * Add WHERE condition comparing two columns with operator.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .whereColumn("updated_at", ">", "created_at")
+     *     .get();
+     * // SQL: WHERE updated_at > created_at
+     * }</pre>
+     *
+     * @param first    first column name
+     * @param operator comparison operator
+     * @param second   second column name
+     * @return this finder for chaining
+     */
+    public Finder<T> whereColumn(String first, String operator, String second) {
+        builder.andRaw(first + " " + operator + " " + second);
+        return this;
+    }
+
+    /**
+     * Add OR WHERE condition comparing two columns (equality).
+     *
+     * @param first  first column name
+     * @param second second column name
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereColumn(String first, String second) {
+        return orWhereColumn(first, "=", second);
+    }
+
+    /**
+     * Add OR WHERE condition comparing two columns with operator.
+     *
+     * @param first    first column name
+     * @param operator comparison operator
+     * @param second   second column name
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereColumn(String first, String operator, String second) {
+        builder.orRaw(first + " " + operator + " " + second);
+        return this;
+    }
+
+    // ==================== EXISTS SUBQUERY ====================
+
+    /**
+     * Add WHERE EXISTS condition with a subquery.
+     *
+     * <pre>{@code
+     * SelectBuilder subquery = Suprim.select()
+     *     .selectRaw("1")
+     *     .from(Table.of("orders"))
+     *     .whereRaw("orders.user_id = users.id");
+     *
+     * executor.find(User.class)
+     *     .whereExists(subquery)
+     *     .get();
+     * // SQL: WHERE EXISTS (SELECT 1 FROM orders WHERE orders.user_id = users.id)
+     * }</pre>
+     *
+     * @param subquery SelectBuilder representing the subquery
+     * @return this finder for chaining
+     */
+    public Finder<T> whereExists(SelectBuilder subquery) {
+        QueryResult subqueryResult = subquery.build();
+        builder.andRaw("EXISTS (" + subqueryResult.sql() + ")", subqueryResult.parameters());
+        return this;
+    }
+
+    /**
+     * Add WHERE EXISTS condition with a subquery builder function.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .whereExists(q -> q
+     *         .selectRaw("1")
+     *         .from(Table.of("orders"))
+     *         .whereRaw("orders.user_id = users.id"))
+     *     .get();
+     * }</pre>
+     *
+     * @param subqueryBuilder function that builds the subquery
+     * @return this finder for chaining
+     */
+    public Finder<T> whereExists(Function<SelectBuilder, SelectBuilder> subqueryBuilder) {
+        SelectBuilder subquery = subqueryBuilder.apply(Suprim.select());
+        return whereExists(subquery);
+    }
+
+    /**
+     * Add WHERE NOT EXISTS condition with a subquery.
+     *
+     * @param subquery SelectBuilder representing the subquery
+     * @return this finder for chaining
+     */
+    public Finder<T> whereNotExists(SelectBuilder subquery) {
+        QueryResult subqueryResult = subquery.build();
+        builder.andRaw("NOT EXISTS (" + subqueryResult.sql() + ")", subqueryResult.parameters());
+        return this;
+    }
+
+    /**
+     * Add WHERE NOT EXISTS condition with a subquery builder function.
+     *
+     * @param subqueryBuilder function that builds the subquery
+     * @return this finder for chaining
+     */
+    public Finder<T> whereNotExists(Function<SelectBuilder, SelectBuilder> subqueryBuilder) {
+        SelectBuilder subquery = subqueryBuilder.apply(Suprim.select());
+        return whereNotExists(subquery);
+    }
+
+    /**
+     * Add OR WHERE EXISTS condition with a subquery.
+     *
+     * @param subquery SelectBuilder representing the subquery
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereExists(SelectBuilder subquery) {
+        QueryResult subqueryResult = subquery.build();
+        builder.orRaw("EXISTS (" + subqueryResult.sql() + ")", subqueryResult.parameters());
+        return this;
+    }
+
+    /**
+     * Add OR WHERE EXISTS condition with a subquery builder function.
+     *
+     * @param subqueryBuilder function that builds the subquery
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereExists(Function<SelectBuilder, SelectBuilder> subqueryBuilder) {
+        SelectBuilder subquery = subqueryBuilder.apply(Suprim.select());
+        return orWhereExists(subquery);
+    }
+
+    /**
+     * Add OR WHERE NOT EXISTS condition with a subquery.
+     *
+     * @param subquery SelectBuilder representing the subquery
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereNotExists(SelectBuilder subquery) {
+        QueryResult subqueryResult = subquery.build();
+        builder.orRaw("NOT EXISTS (" + subqueryResult.sql() + ")", subqueryResult.parameters());
+        return this;
+    }
+
+    /**
+     * Add OR WHERE NOT EXISTS condition with a subquery builder function.
+     *
+     * @param subqueryBuilder function that builds the subquery
+     * @return this finder for chaining
+     */
+    public Finder<T> orWhereNotExists(Function<SelectBuilder, SelectBuilder> subqueryBuilder) {
+        SelectBuilder subquery = subqueryBuilder.apply(Suprim.select());
+        return orWhereNotExists(subquery);
+    }
+
+    // ==================== DATE/TIME EXTRACTION ====================
+
+    /**
+     * Add WHERE condition comparing only the DATE part of a datetime column.
+     *
+     * <pre>{@code
+     * executor.find(Order.class)
+     *     .whereDate("created_at", LocalDate.of(2024, 1, 15))
+     *     .get();
+     * // SQL: WHERE DATE(created_at) = ?
+     * }</pre>
+     *
+     * @param column datetime column name
+     * @param date   date value to compare
+     * @return this finder for chaining
+     */
+    public Finder<T> whereDate(String column, Object date) {
+        return whereDate(column, "=", date);
+    }
+
+    /**
+     * Add WHERE condition comparing DATE part with operator.
+     *
+     * @param column   datetime column name
+     * @param operator comparison operator
+     * @param date     date value to compare
+     * @return this finder for chaining
+     */
+    public Finder<T> whereDate(String column, String operator, Object date) {
+        String paramName = nextParamName();
+        builder.andRaw("DATE(" + column + ") " + operator + " :" + paramName,
+            Map.of(paramName, normalizeValue(column, date)));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE condition comparing DATE part.
+     */
+    public Finder<T> orWhereDate(String column, Object date) {
+        return orWhereDate(column, "=", date);
+    }
+
+    /**
+     * Add OR WHERE condition comparing DATE part with operator.
+     */
+    public Finder<T> orWhereDate(String column, String operator, Object date) {
+        String paramName = nextParamName();
+        builder.orRaw("DATE(" + column + ") " + operator + " :" + paramName,
+            Map.of(paramName, normalizeValue(column, date)));
+        return this;
+    }
+
+    /**
+     * Add WHERE condition comparing only the TIME part of a datetime column.
+     *
+     * <pre>{@code
+     * executor.find(Event.class)
+     *     .whereTime("starts_at", LocalTime.of(9, 0))
+     *     .get();
+     * // SQL: WHERE CAST(starts_at AS TIME) = ?
+     * }</pre>
+     *
+     * @param column datetime column name
+     * @param time   time value to compare
+     * @return this finder for chaining
+     */
+    public Finder<T> whereTime(String column, Object time) {
+        return whereTime(column, "=", time);
+    }
+
+    /**
+     * Add WHERE condition comparing TIME part with operator.
+     */
+    public Finder<T> whereTime(String column, String operator, Object time) {
+        String paramName = nextParamName();
+        builder.andRaw("CAST(" + column + " AS TIME) " + operator + " :" + paramName,
+            Map.of(paramName, normalizeValue(column, time)));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE condition comparing TIME part.
+     */
+    public Finder<T> orWhereTime(String column, Object time) {
+        return orWhereTime(column, "=", time);
+    }
+
+    /**
+     * Add OR WHERE condition comparing TIME part with operator.
+     */
+    public Finder<T> orWhereTime(String column, String operator, Object time) {
+        String paramName = nextParamName();
+        builder.orRaw("CAST(" + column + " AS TIME) " + operator + " :" + paramName,
+            Map.of(paramName, normalizeValue(column, time)));
+        return this;
+    }
+
+    /**
+     * Add WHERE condition matching year of a datetime column.
+     *
+     * <pre>{@code
+     * executor.find(Order.class)
+     *     .whereYear("created_at", 2024)
+     *     .get();
+     * // SQL: WHERE EXTRACT(YEAR FROM created_at) = ?
+     * }</pre>
+     *
+     * @param column datetime column name
+     * @param year   year value
+     * @return this finder for chaining
+     */
+    public Finder<T> whereYear(String column, int year) {
+        return whereYear(column, "=", year);
+    }
+
+    /**
+     * Add WHERE condition matching year with operator.
+     */
+    public Finder<T> whereYear(String column, String operator, int year) {
+        String paramName = nextParamName();
+        builder.andRaw("EXTRACT(YEAR FROM " + column + ") " + operator + " :" + paramName,
+            Map.of(paramName, year));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE condition matching year.
+     */
+    public Finder<T> orWhereYear(String column, int year) {
+        return orWhereYear(column, "=", year);
+    }
+
+    /**
+     * Add OR WHERE condition matching year with operator.
+     */
+    public Finder<T> orWhereYear(String column, String operator, int year) {
+        String paramName = nextParamName();
+        builder.orRaw("EXTRACT(YEAR FROM " + column + ") " + operator + " :" + paramName,
+            Map.of(paramName, year));
+        return this;
+    }
+
+    /**
+     * Add WHERE condition matching month of a datetime column.
+     *
+     * @param column datetime column name
+     * @param month  month value (1-12)
+     * @return this finder for chaining
+     */
+    public Finder<T> whereMonth(String column, int month) {
+        return whereMonth(column, "=", month);
+    }
+
+    /**
+     * Add WHERE condition matching month with operator.
+     */
+    public Finder<T> whereMonth(String column, String operator, int month) {
+        String paramName = nextParamName();
+        builder.andRaw("EXTRACT(MONTH FROM " + column + ") " + operator + " :" + paramName,
+            Map.of(paramName, month));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE condition matching month.
+     */
+    public Finder<T> orWhereMonth(String column, int month) {
+        return orWhereMonth(column, "=", month);
+    }
+
+    /**
+     * Add OR WHERE condition matching month with operator.
+     */
+    public Finder<T> orWhereMonth(String column, String operator, int month) {
+        String paramName = nextParamName();
+        builder.orRaw("EXTRACT(MONTH FROM " + column + ") " + operator + " :" + paramName,
+            Map.of(paramName, month));
+        return this;
+    }
+
+    /**
+     * Add WHERE condition matching day of a datetime column.
+     *
+     * @param column datetime column name
+     * @param day    day value (1-31)
+     * @return this finder for chaining
+     */
+    public Finder<T> whereDay(String column, int day) {
+        return whereDay(column, "=", day);
+    }
+
+    /**
+     * Add WHERE condition matching day with operator.
+     */
+    public Finder<T> whereDay(String column, String operator, int day) {
+        String paramName = nextParamName();
+        builder.andRaw("EXTRACT(DAY FROM " + column + ") " + operator + " :" + paramName,
+            Map.of(paramName, day));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE condition matching day.
+     */
+    public Finder<T> orWhereDay(String column, int day) {
+        return orWhereDay(column, "=", day);
+    }
+
+    /**
+     * Add OR WHERE condition matching day with operator.
+     */
+    public Finder<T> orWhereDay(String column, String operator, int day) {
+        String paramName = nextParamName();
+        builder.orRaw("EXTRACT(DAY FROM " + column + ") " + operator + " :" + paramName,
+            Map.of(paramName, day));
+        return this;
+    }
+
+    // ==================== JSON OPERATIONS ====================
+
+    /**
+     * Add WHERE condition checking if JSONB array contains a value.
+     * Uses PostgreSQL JSONB @> operator.
+     *
+     * <pre>{@code
+     * executor.find(Article.class)
+     *     .whereJsonContains("tags", "urgent")
+     *     .get();
+     * // SQL: WHERE tags @> '["urgent"]'::jsonb
+     * }</pre>
+     *
+     * @param column JSON column name
+     * @param value  value to check for
+     * @return this finder for chaining
+     */
+    public Finder<T> whereJsonContains(String column, Object value) {
+        String paramName = nextParamName();
+        builder.andRaw(column + " @> :" + paramName + "::jsonb",
+            Map.of(paramName, toJsonArray(value)));
+        return this;
+    }
+
+    /**
+     * Add WHERE condition checking value at JSON path.
+     * Uses PostgreSQL JSONB operators.
+     *
+     * <pre>{@code
+     * executor.find(User.class)
+     *     .whereJsonContains("settings", "theme", "dark")
+     *     .get();
+     * // SQL: WHERE settings->>'theme' = ?
+     * }</pre>
+     *
+     * @param column JSON column name
+     * @param path   JSON path (dot notation)
+     * @param value  expected value
+     * @return this finder for chaining
+     */
+    public Finder<T> whereJsonContains(String column, String path, Object value) {
+        String paramName = nextParamName();
+        String jsonPath = buildJsonPath(column, path);
+        builder.andRaw(jsonPath + " = :" + paramName,
+            Map.of(paramName, String.valueOf(value)));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE condition checking if JSONB array contains a value.
+     */
+    public Finder<T> orWhereJsonContains(String column, Object value) {
+        String paramName = nextParamName();
+        builder.orRaw(column + " @> :" + paramName + "::jsonb",
+            Map.of(paramName, toJsonArray(value)));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE condition checking value at JSON path.
+     */
+    public Finder<T> orWhereJsonContains(String column, String path, Object value) {
+        String paramName = nextParamName();
+        String jsonPath = buildJsonPath(column, path);
+        builder.orRaw(jsonPath + " = :" + paramName,
+            Map.of(paramName, String.valueOf(value)));
+        return this;
+    }
+
+    /**
+     * Add WHERE condition checking JSONB array length.
+     *
+     * <pre>{@code
+     * executor.find(Article.class)
+     *     .whereJsonLength("tags", 3)
+     *     .get();
+     * // SQL: WHERE jsonb_array_length(tags) = 3
+     * }</pre>
+     */
+    public Finder<T> whereJsonLength(String column, int length) {
+        return whereJsonLength(column, "=", length);
+    }
+
+    /**
+     * Add WHERE condition checking JSONB array length with operator.
+     */
+    public Finder<T> whereJsonLength(String column, String operator, int length) {
+        String paramName = nextParamName();
+        builder.andRaw("jsonb_array_length(" + column + ") " + operator + " :" + paramName,
+            Map.of(paramName, length));
+        return this;
+    }
+
+    /**
+     * Add OR WHERE condition checking JSONB array length.
+     */
+    public Finder<T> orWhereJsonLength(String column, int length) {
+        return orWhereJsonLength(column, "=", length);
+    }
+
+    /**
+     * Add OR WHERE condition checking JSONB array length with operator.
+     */
+    public Finder<T> orWhereJsonLength(String column, String operator, int length) {
+        String paramName = nextParamName();
+        builder.orRaw("jsonb_array_length(" + column + ") " + operator + " :" + paramName,
+            Map.of(paramName, length));
+        return this;
+    }
+
+    // ==================== JSON HELPERS ====================
+
+    /**
+     * Convert value to JSON array string for @> operator.
+     */
+    private String toJsonArray(Object value) {
+        if (value instanceof String) {
+            return "[\"" + value + "\"]";
+        } else if (value instanceof Number || value instanceof Boolean) {
+            return "[" + value + "]";
+        }
+        return "[" + value + "]";
+    }
+
+    /**
+     * Build PostgreSQL JSON path expression from dot notation.
+     * "settings.theme" -> "settings->>'theme'"
+     * "settings.notifications.email" -> "settings->'notifications'->>'email'"
+     */
+    private String buildJsonPath(String column, String path) {
+        String[] parts = path.split("\\.");
+        StringBuilder result = new StringBuilder(column);
+        for (int i = 0; i < parts.length; i++) {
+            if (i == parts.length - 1) {
+                result.append("->>").append("'").append(parts[i]).append("'");
+            } else {
+                result.append("->").append("'").append(parts[i]).append("'");
+            }
+        }
+        return result.toString();
+    }
+
     // ==================== GROUPED CONDITIONS ====================
 
     /**
