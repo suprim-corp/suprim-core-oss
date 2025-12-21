@@ -1,339 +1,581 @@
 package sant1ago.dev.suprim.jdbc;
 
-import org.h2.jdbcx.JdbcDataSource;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import sant1ago.dev.suprim.annotation.entity.Column;
-import sant1ago.dev.suprim.annotation.entity.Entity;
-import sant1ago.dev.suprim.annotation.entity.Id;
-import sant1ago.dev.suprim.annotation.type.GenerationType;
-import sant1ago.dev.suprim.annotation.type.SqlType;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import sant1ago.dev.suprim.core.dialect.MySqlDialect;
+import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
 import sant1ago.dev.suprim.core.query.QueryResult;
+import sant1ago.dev.suprim.jdbc.event.EventDispatcher;
+import sant1ago.dev.suprim.jdbc.event.TransactionEvent;
 import sant1ago.dev.suprim.jdbc.exception.NoResultException;
 import sant1ago.dev.suprim.jdbc.exception.NonUniqueResultException;
 import sant1ago.dev.suprim.jdbc.exception.SavepointException;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Savepoint;
-import java.sql.Statement;
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
 
 /**
- * Tests for Transaction class - transaction context operations.
+ * Tests for Transaction operations.
  */
 @DisplayName("Transaction Tests")
+@ExtendWith(MockitoExtension.class)
 class TransactionTest {
 
-    private JdbcDataSource dataSource;
-    private SuprimExecutor executor;
-    private Connection setupConnection;
+    @Mock
+    private Connection mockConnection;
 
-    @BeforeEach
-    void setUp() throws Exception {
-        dataSource = new JdbcDataSource();
-        dataSource.setURL("jdbc:h2:mem:txtest;DB_CLOSE_DELAY=-1");
+    @Mock
+    private PreparedStatement mockPreparedStatement;
 
-        setupConnection = dataSource.getConnection();
-        try (Statement stmt = setupConnection.createStatement()) {
-            stmt.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id VARCHAR(36) PRIMARY KEY,
-                    email VARCHAR(255) NOT NULL UNIQUE,
-                    name VARCHAR(100),
-                    is_active BOOLEAN DEFAULT TRUE
-                )
-                """);
+    @Mock
+    private ResultSet mockResultSet;
+
+    @Mock
+    private EventDispatcher mockDispatcher;
+
+    @Mock
+    private TransactionEvent mockTransactionEvent;
+
+    @Mock
+    private Savepoint mockSavepoint;
+
+    private Transaction transaction;
+
+    // Simple QueryResult for testing
+    private QueryResult createQueryResult(String sql, Object... params) {
+        Map<String, Object> paramMap = new HashMap<>();
+        for (int i = 0; i < params.length; i++) {
+            paramMap.put("p" + i, params[i]);
         }
-
-        executor = SuprimExecutor.create(dataSource);
+        return new QueryResult(sql, paramMap);
     }
 
-    @AfterEach
-    void tearDown() throws Exception {
-        try (Statement stmt = setupConnection.createStatement()) {
-            stmt.execute("DROP TABLE IF EXISTS users");
-        }
-        setupConnection.close();
-    }
-
-    // ==================== queryOneRequired Tests ====================
+    // ==================== CONSTRUCTOR TESTS ====================
 
     @Nested
-    @DisplayName("queryOneRequired Tests")
+    @DisplayName("Constructor")
+    class ConstructorTests {
+
+        @Test
+        @DisplayName("creates transaction with connection only")
+        void createsWithConnectionOnly() {
+            Transaction tx = new Transaction(mockConnection);
+            assertNotNull(tx);
+            assertEquals(mockConnection, tx.getConnection());
+        }
+
+        @Test
+        @DisplayName("creates transaction with all parameters")
+        void createsWithAllParameters() {
+            Transaction tx = new Transaction(mockConnection, mockDispatcher, "test-connection", mockTransactionEvent);
+            assertNotNull(tx);
+            assertEquals(mockConnection, tx.getConnection());
+        }
+
+        @Test
+        @DisplayName("creates transaction with null dispatcher")
+        void createsWithNullDispatcher() {
+            Transaction tx = new Transaction(mockConnection, null, "test-connection", mockTransactionEvent);
+            assertNotNull(tx);
+        }
+
+        @Test
+        @DisplayName("creates transaction with null connection name")
+        void createsWithNullConnectionName() {
+            Transaction tx = new Transaction(mockConnection, mockDispatcher, null, mockTransactionEvent);
+            assertNotNull(tx);
+        }
+
+        @Test
+        @DisplayName("throws for null connection")
+        void throwsForNullConnection() {
+            assertThrows(NullPointerException.class, () -> new Transaction(null));
+        }
+    }
+
+    // ==================== QUERY TESTS ====================
+
+    @Nested
+    @DisplayName("query()")
+    class QueryTests {
+
+        @BeforeEach
+        void setup() {
+            transaction = new Transaction(mockConnection, mockDispatcher, "test", null);
+        }
+
+        @Test
+        @DisplayName("returns list of mapped results")
+        void returnsListOfMappedResults() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeQuery()).thenReturn(mockResultSet);
+            when(mockResultSet.next()).thenReturn(true, true, false);
+            when(mockResultSet.getString("name")).thenReturn("Alice", "Bob");
+
+            QueryResult qr = createQueryResult("SELECT * FROM users WHERE active = ?", true);
+
+            List<String> results = transaction.query(qr, rs -> rs.getString("name"));
+
+            assertEquals(2, results.size());
+            assertEquals("Alice", results.get(0));
+            assertEquals("Bob", results.get(1));
+        }
+
+        @Test
+        @DisplayName("returns empty list when no results")
+        void returnsEmptyListWhenNoResults() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeQuery()).thenReturn(mockResultSet);
+            when(mockResultSet.next()).thenReturn(false);
+
+            QueryResult qr = createQueryResult("SELECT * FROM users");
+
+            List<String> results = transaction.query(qr, rs -> rs.getString("name"));
+
+            assertTrue(results.isEmpty());
+        }
+
+        @Test
+        @DisplayName("fires query events")
+        void firesQueryEvents() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeQuery()).thenReturn(mockResultSet);
+            when(mockResultSet.next()).thenReturn(false);
+
+            QueryResult qr = createQueryResult("SELECT 1");
+            transaction.query(qr, rs -> rs.getString(1));
+
+            verify(mockDispatcher).fireBeforeQuery(any());
+            verify(mockDispatcher).fireAfterQuery(any());
+        }
+
+        @Test
+        @DisplayName("fires error event on SQLException")
+        void firesErrorEventOnSqlException() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeQuery()).thenThrow(new SQLException("Query failed"));
+
+            QueryResult qr = createQueryResult("SELECT * FROM invalid");
+
+            assertThrows(Exception.class, () -> transaction.query(qr, rs -> rs.getString(1)));
+            verify(mockDispatcher).fireQueryError(any());
+        }
+    }
+
+    // ==================== QUERY ONE TESTS ====================
+
+    @Nested
+    @DisplayName("queryOne()")
+    class QueryOneTests {
+
+        @BeforeEach
+        void setup() {
+            transaction = new Transaction(mockConnection, mockDispatcher, "test", null);
+        }
+
+        @Test
+        @DisplayName("returns optional with result")
+        void returnsOptionalWithResult() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeQuery()).thenReturn(mockResultSet);
+            when(mockResultSet.next()).thenReturn(true, false);
+            when(mockResultSet.getString("name")).thenReturn("Alice");
+
+            QueryResult qr = createQueryResult("SELECT * FROM users WHERE id = ?", 1);
+
+            Optional<String> result = transaction.queryOne(qr, rs -> rs.getString("name"));
+
+            assertTrue(result.isPresent());
+            assertEquals("Alice", result.get());
+        }
+
+        @Test
+        @DisplayName("returns empty optional when no results")
+        void returnsEmptyOptionalWhenNoResults() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeQuery()).thenReturn(mockResultSet);
+            when(mockResultSet.next()).thenReturn(false);
+
+            QueryResult qr = createQueryResult("SELECT * FROM users WHERE id = ?", 999);
+
+            Optional<String> result = transaction.queryOne(qr, rs -> rs.getString("name"));
+
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("throws NonUniqueResultException for multiple results")
+        void throwsForMultipleResults() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeQuery()).thenReturn(mockResultSet);
+            when(mockResultSet.next()).thenReturn(true, true);
+            when(mockResultSet.getString("name")).thenReturn("Alice");
+
+            QueryResult qr = createQueryResult("SELECT * FROM users");
+
+            assertThrows(NonUniqueResultException.class, () ->
+                transaction.queryOne(qr, rs -> rs.getString("name")));
+        }
+    }
+
+    // ==================== QUERY ONE REQUIRED TESTS ====================
+
+    @Nested
+    @DisplayName("queryOneRequired()")
     class QueryOneRequiredTests {
 
-        @Test
-        @DisplayName("queryOneRequired returns single result when exactly one row exists")
-        void queryOneRequired_singleRow_returnsResult() {
-            insertTestUser("alice@example.com", "Alice");
-
-            executor.transaction(tx -> {
-                QueryResult query = new QueryResult(
-                    "SELECT email, name FROM users WHERE email = :p1",
-                    Map.of("p1", "alice@example.com")
-                );
-
-                String name = tx.queryOneRequired(query, rs -> rs.getString("name"));
-                assertEquals("Alice", name);
-            });
+        @BeforeEach
+        void setup() {
+            transaction = new Transaction(mockConnection, mockDispatcher, "test", null);
         }
 
         @Test
-        @DisplayName("queryOneRequired throws NoResultException when no rows")
-        void queryOneRequired_noRows_throwsNoResultException() {
-            executor.transaction(tx -> {
-                QueryResult query = new QueryResult(
-                    "SELECT email FROM users WHERE email = :p1",
-                    Map.of("p1", "nonexistent@example.com")
-                );
+        @DisplayName("returns result when exactly one row")
+        void returnsResultWhenExactlyOneRow() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeQuery()).thenReturn(mockResultSet);
+            when(mockResultSet.next()).thenReturn(true, false);
+            when(mockResultSet.getString("name")).thenReturn("Alice");
 
-                assertThrows(NoResultException.class, () ->
-                    tx.queryOneRequired(query, rs -> rs.getString("email"))
-                );
-            });
+            QueryResult qr = createQueryResult("SELECT * FROM users WHERE id = ?", 1);
+
+            String result = transaction.queryOneRequired(qr, rs -> rs.getString("name"));
+
+            assertEquals("Alice", result);
         }
 
         @Test
-        @DisplayName("queryOneRequired throws NonUniqueResultException when multiple rows")
-        void queryOneRequired_multipleRows_throwsNonUniqueResultException() {
-            insertTestUser("alice@example.com", "Alice");
-            insertTestUser("bob@example.com", "Bob");
+        @DisplayName("throws NoResultException when no results")
+        void throwsNoResultExceptionWhenNoResults() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeQuery()).thenReturn(mockResultSet);
+            when(mockResultSet.next()).thenReturn(false);
 
-            executor.transaction(tx -> {
-                QueryResult query = new QueryResult(
-                    "SELECT email FROM users",
-                    Map.of()
-                );
+            QueryResult qr = createQueryResult("SELECT * FROM users WHERE id = ?", 999);
 
-                assertThrows(NonUniqueResultException.class, () ->
-                    tx.queryOneRequired(query, rs -> rs.getString("email"))
-                );
-            });
+            assertThrows(NoResultException.class, () ->
+                transaction.queryOneRequired(qr, rs -> rs.getString("name")));
+        }
+
+        @Test
+        @DisplayName("throws NonUniqueResultException for multiple results")
+        void throwsForMultipleResults() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeQuery()).thenReturn(mockResultSet);
+            when(mockResultSet.next()).thenReturn(true, true);
+            when(mockResultSet.getString("name")).thenReturn("Alice");
+
+            QueryResult qr = createQueryResult("SELECT * FROM users");
+
+            assertThrows(NonUniqueResultException.class, () ->
+                transaction.queryOneRequired(qr, rs -> rs.getString("name")));
         }
     }
 
-    // ==================== Savepoint Tests ====================
+    // ==================== EXECUTE TESTS ====================
 
     @Nested
-    @DisplayName("Savepoint Tests")
+    @DisplayName("execute()")
+    class ExecuteTests {
+
+        @BeforeEach
+        void setup() {
+            transaction = new Transaction(mockConnection, mockDispatcher, "test", null);
+        }
+
+        @Test
+        @DisplayName("returns affected row count")
+        void returnsAffectedRowCount() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeUpdate()).thenReturn(5);
+
+            QueryResult qr = createQueryResult("UPDATE users SET active = ?", true);
+
+            int affected = transaction.execute(qr);
+
+            assertEquals(5, affected);
+        }
+
+        @Test
+        @DisplayName("fires query events")
+        void firesQueryEvents() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeUpdate()).thenReturn(1);
+
+            QueryResult qr = createQueryResult("DELETE FROM users WHERE id = ?", 1);
+            transaction.execute(qr);
+
+            verify(mockDispatcher).fireBeforeQuery(any());
+            verify(mockDispatcher).fireAfterQuery(any());
+        }
+
+        @Test
+        @DisplayName("fires error event on SQLException")
+        void firesErrorEventOnSqlException() throws SQLException {
+            when(mockConnection.prepareStatement(anyString())).thenReturn(mockPreparedStatement);
+            when(mockPreparedStatement.executeUpdate()).thenThrow(new SQLException("Execution failed"));
+
+            QueryResult qr = createQueryResult("DELETE FROM nonexistent");
+
+            assertThrows(Exception.class, () -> transaction.execute(qr));
+            verify(mockDispatcher).fireQueryError(any());
+        }
+    }
+
+    // ==================== SAVEPOINT TESTS ====================
+
+    @Nested
+    @DisplayName("Savepoint Operations")
     class SavepointTests {
 
-        @Test
-        @DisplayName("savepoint creates named savepoint")
-        void savepoint_createsNamedSavepoint() {
-            executor.transaction(tx -> {
-                insertTestUserInTx(tx, "alice@example.com", "Alice");
-
-                Savepoint sp = tx.savepoint("before_bob");
-                assertNotNull(sp);
-
-                insertTestUserInTx(tx, "bob@example.com", "Bob");
-
-                // Both users should exist
-                List<String> emails = tx.query(
-                    new QueryResult("SELECT email FROM users ORDER BY email", Map.of()),
-                    rs -> rs.getString("email")
-                );
-                assertEquals(2, emails.size());
-            });
+        @BeforeEach
+        void setup() {
+            transaction = new Transaction(mockConnection, mockDispatcher, "test", mockTransactionEvent);
         }
 
         @Test
-        @DisplayName("rollbackTo reverts to savepoint state")
-        void rollbackTo_revertsToSavepointState() {
-            executor.transaction(tx -> {
-                insertTestUserInTx(tx, "alice@example.com", "Alice");
+        @DisplayName("creates savepoint")
+        void createsSavepoint() throws SQLException {
+            when(mockConnection.setSavepoint("sp1")).thenReturn(mockSavepoint);
+            when(mockTransactionEvent.savepointCreated("sp1")).thenReturn(mockTransactionEvent);
 
-                Savepoint sp = tx.savepoint("before_bob");
+            Savepoint sp = transaction.savepoint("sp1");
 
-                insertTestUserInTx(tx, "bob@example.com", "Bob");
-
-                // Rollback to savepoint
-                tx.rollbackTo(sp);
-
-                // Only Alice should exist
-                List<String> emails = tx.query(
-                    new QueryResult("SELECT email FROM users", Map.of()),
-                    rs -> rs.getString("email")
-                );
-                assertEquals(1, emails.size());
-                assertEquals("alice@example.com", emails.get(0));
-            });
+            assertNotNull(sp);
+            verify(mockConnection).setSavepoint("sp1");
+            verify(mockDispatcher).fireTransactionEvent(any());
         }
 
         @Test
-        @DisplayName("releaseSavepoint releases savepoint resources")
-        void releaseSavepoint_releasesSavepoint() {
-            executor.transaction(tx -> {
-                insertTestUserInTx(tx, "alice@example.com", "Alice");
+        @DisplayName("throws SavepointException on create failure")
+        void throwsOnCreateFailure() throws SQLException {
+            when(mockConnection.setSavepoint("sp1")).thenThrow(new SQLException("Savepoint failed"));
 
-                Savepoint sp = tx.savepoint("checkpoint");
-
-                insertTestUserInTx(tx, "bob@example.com", "Bob");
-
-                // Release savepoint (frees resources but doesn't rollback)
-                tx.releaseSavepoint(sp);
-
-                // Both users should still exist
-                List<String> emails = tx.query(
-                    new QueryResult("SELECT email FROM users ORDER BY email", Map.of()),
-                    rs -> rs.getString("email")
-                );
-                assertEquals(2, emails.size());
-            });
+            assertThrows(SavepointException.class, () -> transaction.savepoint("sp1"));
         }
 
         @Test
-        @DisplayName("multiple savepoints work correctly")
-        void multipleSavepoints_workCorrectly() {
-            executor.transaction(tx -> {
-                insertTestUserInTx(tx, "alice@example.com", "Alice");
-                Savepoint sp1 = tx.savepoint("after_alice");
+        @DisplayName("rolls back to savepoint")
+        void rollsBackToSavepoint() throws SQLException {
+            when(mockSavepoint.getSavepointName()).thenReturn("sp1");
+            when(mockTransactionEvent.savepointRollback("sp1")).thenReturn(mockTransactionEvent);
 
-                insertTestUserInTx(tx, "bob@example.com", "Bob");
-                Savepoint sp2 = tx.savepoint("after_bob");
+            transaction.rollbackTo(mockSavepoint);
 
-                insertTestUserInTx(tx, "charlie@example.com", "Charlie");
+            verify(mockConnection).rollback(mockSavepoint);
+            verify(mockDispatcher).fireTransactionEvent(any());
+        }
 
-                // Rollback to after_bob (removes Charlie)
-                tx.rollbackTo(sp2);
+        @Test
+        @DisplayName("throws SavepointException on rollback failure")
+        void throwsOnRollbackFailure() throws SQLException {
+            when(mockSavepoint.getSavepointName()).thenReturn("sp1");
+            doThrow(new SQLException("Rollback failed")).when(mockConnection).rollback(mockSavepoint);
 
-                List<String> emails = tx.query(
-                    new QueryResult("SELECT email FROM users ORDER BY email", Map.of()),
-                    rs -> rs.getString("email")
-                );
-                assertEquals(2, emails.size());
-                assertTrue(emails.contains("alice@example.com"));
-                assertTrue(emails.contains("bob@example.com"));
-            });
+            assertThrows(SavepointException.class, () -> transaction.rollbackTo(mockSavepoint));
+        }
+
+        @Test
+        @DisplayName("releases savepoint")
+        void releasesSavepoint() throws SQLException {
+            when(mockSavepoint.getSavepointName()).thenReturn("sp1");
+            when(mockTransactionEvent.savepointReleased("sp1")).thenReturn(mockTransactionEvent);
+
+            transaction.releaseSavepoint(mockSavepoint);
+
+            verify(mockConnection).releaseSavepoint(mockSavepoint);
+            verify(mockDispatcher).fireTransactionEvent(any());
+        }
+
+        @Test
+        @DisplayName("throws SavepointException on release failure")
+        void throwsOnReleaseFailure() throws SQLException {
+            when(mockSavepoint.getSavepointName()).thenReturn("sp1");
+            doThrow(new SQLException("Release failed")).when(mockConnection).releaseSavepoint(mockSavepoint);
+
+            assertThrows(SavepointException.class, () -> transaction.releaseSavepoint(mockSavepoint));
+        }
+
+        @Test
+        @DisplayName("handles getSavepointName exception")
+        void handlesSavepointNameException() throws SQLException {
+            when(mockSavepoint.getSavepointName()).thenThrow(new SQLException("No name"));
+            doThrow(new SQLException("Rollback failed")).when(mockConnection).rollback(mockSavepoint);
+
+            assertThrows(SavepointException.class, () -> transaction.rollbackTo(mockSavepoint));
         }
     }
 
-    // ==================== getConnection Tests ====================
+    // ==================== SAVEPOINT WITHOUT EVENT TESTS ====================
 
     @Nested
-    @DisplayName("getConnection Tests")
+    @DisplayName("Savepoint Operations Without Event")
+    class SavepointWithoutEventTests {
+
+        @BeforeEach
+        void setup() {
+            transaction = new Transaction(mockConnection, mockDispatcher, "test", null);
+        }
+
+        @Test
+        @DisplayName("creates savepoint without firing event")
+        void createsSavepointWithoutEvent() throws SQLException {
+            when(mockConnection.setSavepoint("sp1")).thenReturn(mockSavepoint);
+
+            Savepoint sp = transaction.savepoint("sp1");
+
+            assertNotNull(sp);
+            verify(mockDispatcher, never()).fireTransactionEvent(any());
+        }
+
+        @Test
+        @DisplayName("rolls back without firing event")
+        void rollsBackWithoutEvent() throws SQLException {
+            when(mockSavepoint.getSavepointName()).thenReturn("sp1");
+
+            transaction.rollbackTo(mockSavepoint);
+
+            verify(mockDispatcher, never()).fireTransactionEvent(any());
+        }
+
+        @Test
+        @DisplayName("releases without firing event")
+        void releasesWithoutEvent() throws SQLException {
+            when(mockSavepoint.getSavepointName()).thenReturn("sp1");
+
+            transaction.releaseSavepoint(mockSavepoint);
+
+            verify(mockDispatcher, never()).fireTransactionEvent(any());
+        }
+    }
+
+    // ==================== RELATIONSHIPS TESTS ====================
+
+    @Nested
+    @DisplayName("relationships()")
+    class RelationshipsTests {
+
+        @BeforeEach
+        void setup() {
+            transaction = new Transaction(mockConnection);
+        }
+
+        @Test
+        @DisplayName("returns RelationshipManager")
+        void returnsRelationshipManager() {
+            RelationshipManager rm = transaction.relationships();
+            assertNotNull(rm);
+        }
+    }
+
+    // ==================== SAVE ALL TESTS ====================
+
+    @Nested
+    @DisplayName("saveAll()")
+    class SaveAllTests {
+
+        @BeforeEach
+        void setup() {
+            transaction = new Transaction(mockConnection);
+        }
+
+        @Test
+        @DisplayName("returns empty list for null input")
+        void returnsEmptyListForNullInput() {
+            List<Object> result = transaction.saveAll(null);
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns empty list for empty input")
+        void returnsEmptyListForEmptyInput() {
+            List<Object> result = transaction.saveAll(new ArrayList<>());
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns empty list for null input with dialect")
+        void returnsEmptyListForNullInputWithDialect() {
+            List<Object> result = transaction.saveAll(null, PostgreSqlDialect.INSTANCE);
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns empty list for empty input with dialect")
+        void returnsEmptyListForEmptyInputWithDialect() {
+            List<Object> result = transaction.saveAll(new ArrayList<>(), PostgreSqlDialect.INSTANCE);
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns empty list for null input with batch size")
+        void returnsEmptyListForNullInputWithBatchSize() {
+            List<Object> result = transaction.saveAll(null, 100, PostgreSqlDialect.INSTANCE);
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns empty list for empty input with batch size")
+        void returnsEmptyListForEmptyInputWithBatchSize() {
+            List<Object> result = transaction.saveAll(new ArrayList<>(), 100, PostgreSqlDialect.INSTANCE);
+            assertTrue(result.isEmpty());
+        }
+    }
+
+    // ==================== UPSERT ALL TESTS ====================
+
+    @Nested
+    @DisplayName("upsertAll()")
+    class UpsertAllTests {
+
+        @BeforeEach
+        void setup() {
+            transaction = new Transaction(mockConnection);
+        }
+
+        @Test
+        @DisplayName("returns empty list for null input")
+        void returnsEmptyListForNullInput() {
+            List<Object> result = transaction.upsertAll(null, new String[]{"id"}, null, PostgreSqlDialect.INSTANCE);
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns empty list for empty input")
+        void returnsEmptyListForEmptyInput() {
+            List<Object> result = transaction.upsertAll(new ArrayList<>(), new String[]{"id"}, null, PostgreSqlDialect.INSTANCE);
+            assertTrue(result.isEmpty());
+        }
+    }
+
+    // ==================== GET CONNECTION TESTS ====================
+
+    @Nested
+    @DisplayName("getConnection()")
     class GetConnectionTests {
 
         @Test
-        @DisplayName("getConnection returns underlying connection")
-        void getConnection_returnsConnection() {
-            executor.transaction(tx -> {
-                Connection conn = tx.getConnection();
-                assertNotNull(conn);
-                // Connection should be open (not closed)
-                try {
-                    assertFalse(conn.isClosed());
-                } catch (java.sql.SQLException e) {
-                    fail("Failed to check connection state: " + e.getMessage());
-                }
-            });
+        @DisplayName("returns the underlying connection")
+        void returnsUnderlyingConnection() {
+            Transaction tx = new Transaction(mockConnection);
+            assertEquals(mockConnection, tx.getConnection());
         }
-    }
-
-    // ==================== relationships Tests ====================
-
-    @Nested
-    @DisplayName("relationships Tests")
-    class RelationshipsTests {
-
-        @Test
-        @DisplayName("relationships returns RelationshipManager")
-        void relationships_returnsRelationshipManager() {
-            executor.transaction(tx -> {
-                RelationshipManager rm = tx.relationships();
-                assertNotNull(rm);
-            });
-        }
-    }
-
-    // ==================== Legacy Constructor Tests ====================
-
-    @Nested
-    @DisplayName("Legacy Constructor Tests")
-    class LegacyConstructorTests {
-
-        @Test
-        @DisplayName("legacy constructor creates Transaction with defaults")
-        void legacyConstructor_createsTransactionWithDefaults() throws Exception {
-            try (Connection conn = dataSource.getConnection()) {
-                Transaction tx = new Transaction(conn);
-                assertNotNull(tx);
-                assertEquals(conn, tx.getConnection());
-            }
-        }
-
-        @Test
-        @DisplayName("legacy constructor throws on null connection")
-        void legacyConstructor_nullConnection_throwsNPE() {
-            assertThrows(NullPointerException.class, () ->
-                new Transaction(null)
-            );
-        }
-    }
-
-    // ==================== Helper Methods ====================
-
-    private void insertTestUser(String email, String name) {
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("p1", UUID.randomUUID().toString());
-        params.put("p2", email);
-        params.put("p3", name);
-
-        executor.execute(new QueryResult(
-            "INSERT INTO users (id, email, name) VALUES (:p1, :p2, :p3)",
-            params
-        ));
-    }
-
-    private void insertTestUserInTx(Transaction tx, String email, String name) {
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("p1", UUID.randomUUID().toString());
-        params.put("p2", email);
-        params.put("p3", name);
-
-        tx.execute(new QueryResult(
-            "INSERT INTO users (id, email, name) VALUES (:p1, :p2, :p3)",
-            params
-        ));
-    }
-
-    /**
-     * Test entity for entity persistence tests.
-     */
-    @Entity(table = "users")
-    public static class UserEntity {
-        @Id(strategy = GenerationType.UUID_V4)
-        @Column(name = "id", type = SqlType.UUID)
-        private String id;
-
-        @Column(name = "email", type = SqlType.VARCHAR)
-        private String email;
-
-        @Column(name = "name", type = SqlType.VARCHAR)
-        private String name;
-
-        @Column(name = "is_active", type = SqlType.BOOLEAN)
-        private Boolean isActive;
-
-        public UserEntity() {}
-
-        public String getId() { return id; }
-        public void setId(String id) { this.id = id; }
-        public String getEmail() { return email; }
-        public void setEmail(String email) { this.email = email; }
-        public String getName() { return name; }
-        public void setName(String name) { this.name = name; }
-        public Boolean getIsActive() { return isActive; }
-        public void setIsActive(Boolean isActive) { this.isActive = isActive; }
     }
 }

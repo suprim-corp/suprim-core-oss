@@ -39,6 +39,50 @@ public sealed interface Predicate permits Predicate.SimplePredicate, Predicate.C
     }
 
     /**
+     * Combine with OR EXISTS: this OR EXISTS (subquery)
+     * <pre>{@code
+     * // WHERE (app_type != 'SIMPLE' OR EXISTS (SELECT 1 FROM models WHERE ...))
+     * .and(Application_.APP_TYPE.ne("SIMPLE").orExists(existsSubquery))
+     * }</pre>
+     */
+    default Predicate orExists(SelectBuilder subquery) {
+        return new CompositePredicate(this, LogicalOperator.OR, SubqueryExpression.exists(subquery));
+    }
+
+    /**
+     * Combine with OR NOT EXISTS: this OR NOT EXISTS (subquery)
+     * <pre>{@code
+     * // WHERE (is_active = true OR NOT EXISTS (SELECT 1 FROM sessions WHERE ...))
+     * .and(User_.IS_ACTIVE.eq(true).orNotExists(sessionsSubquery))
+     * }</pre>
+     */
+    default Predicate orNotExists(SelectBuilder subquery) {
+        return new CompositePredicate(this, LogicalOperator.OR, SubqueryExpression.notExists(subquery));
+    }
+
+    /**
+     * Combine with AND EXISTS: this AND EXISTS (subquery)
+     * <pre>{@code
+     * // WHERE (status = 'ACTIVE' AND EXISTS (SELECT 1 FROM orders WHERE ...))
+     * .and(User_.STATUS.eq("ACTIVE").andExists(ordersSubquery))
+     * }</pre>
+     */
+    default Predicate andExists(SelectBuilder subquery) {
+        return new CompositePredicate(this, LogicalOperator.AND, SubqueryExpression.exists(subquery));
+    }
+
+    /**
+     * Combine with AND NOT EXISTS: this AND NOT EXISTS (subquery)
+     * <pre>{@code
+     * // WHERE (role = 'ADMIN' AND NOT EXISTS (SELECT 1 FROM bans WHERE ...))
+     * .and(User_.ROLE.eq("ADMIN").andNotExists(bansSubquery))
+     * }</pre>
+     */
+    default Predicate andNotExists(SelectBuilder subquery) {
+        return new CompositePredicate(this, LogicalOperator.AND, SubqueryExpression.notExists(subquery));
+    }
+
+    /**
      * Render as SQL (inline literals).
      */
     String toSql(SqlDialect dialect);

@@ -7,6 +7,8 @@ import sant1ago.dev.suprim.casey.Casey;
 import sant1ago.dev.suprim.core.type.Aggregate;
 import sant1ago.dev.suprim.core.type.Coalesce;
 import sant1ago.dev.suprim.core.type.Expression;
+import sant1ago.dev.suprim.core.type.Predicate;
+import sant1ago.dev.suprim.core.type.SubqueryExpression;
 import sant1ago.dev.suprim.core.type.Table;
 
 import java.io.Serializable;
@@ -493,5 +495,41 @@ public final class Suprim {
      */
     public static <V> Coalesce<V> coalesce(Expression<V> column, V fallback) {
         return Coalesce.of(column, fallback);
+    }
+
+    // ==================== EXISTS PREDICATES ====================
+
+    /**
+     * Create EXISTS predicate for use in conditions.
+     * <pre>{@code
+     * // Direct usage in WHERE
+     * .where(Suprim.exists(subquery))
+     *
+     * // Combined with other predicates
+     * .and(User_.ROLE.eq("ADMIN").or(Suprim.exists(ordersSubquery)))
+     * }</pre>
+     *
+     * @param subquery the subquery to check existence for
+     * @return EXISTS predicate
+     */
+    public static Predicate exists(SelectBuilder subquery) {
+        return SubqueryExpression.exists(subquery);
+    }
+
+    /**
+     * Create NOT EXISTS predicate for use in conditions.
+     * <pre>{@code
+     * // Direct usage in WHERE
+     * .where(Suprim.notExists(bannedUsersSubquery))
+     *
+     * // Combined with other predicates
+     * .and(User_.IS_ACTIVE.eq(true).or(Suprim.notExists(pendingOrdersSubquery)))
+     * }</pre>
+     *
+     * @param subquery the subquery to check non-existence for
+     * @return NOT EXISTS predicate
+     */
+    public static Predicate notExists(SelectBuilder subquery) {
+        return SubqueryExpression.notExists(subquery);
     }
 }

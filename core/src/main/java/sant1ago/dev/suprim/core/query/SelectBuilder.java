@@ -7,6 +7,8 @@ import sant1ago.dev.suprim.core.dialect.UnsupportedDialectFeatureException;
 import sant1ago.dev.suprim.core.type.*;
 
 import java.util.*;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static java.util.Objects.isNull;
@@ -188,13 +190,36 @@ public final class SelectBuilder {
     }
 
     /**
+     * Add grouped WHERE condition using closure (Laravel-style).
+     * Conditions inside closure are grouped with parentheses.
+     * <pre>{@code
+     * // Simple grouping
+     * .where(q -> q.where(User_.ROLE.eq("ADMIN")).or(User_.ROLE.eq("MOD")))
+     * // SQL: WHERE (role = 'ADMIN' OR role = 'MOD')
+     *
+     * // Combined with EXISTS
+     * .where(q -> q.where(App_.TYPE.ne("SIMPLE")).orExists(modelsSubquery))
+     * // SQL: WHERE (type != 'SIMPLE' OR EXISTS (...))
+     * }</pre>
+     */
+    public SelectBuilder where(Function<SelectBuilder, SelectBuilder> group) {
+        SelectBuilder nested = new SelectBuilder(List.of());
+        nested = group.apply(nested);
+        Predicate groupedPredicate = nested.getWhereClause();
+        if (nonNull(groupedPredicate)) {
+            this.whereClause = groupedPredicate;
+        }
+        return this;
+    }
+
+    /**
      * Add WHERE condition only if value is present (not null).
      * <pre>{@code
      * String email = request.getEmail(); // may be null
      * .whereIfPresent(email, () -> User_.EMAIL.eq(email))
      * }</pre>
      */
-    public <V> SelectBuilder whereIfPresent(V value, java.util.function.Supplier<Predicate> predicateSupplier) {
+    public <V> SelectBuilder whereIfPresent(V value, Supplier<Predicate> predicateSupplier) {
         if (nonNull(value)) {
             this.whereClause = predicateSupplier.get();
         }
@@ -236,6 +261,33 @@ public final class SelectBuilder {
     }
 
     /**
+     * Add grouped AND condition using closure (Laravel-style).
+     * Conditions inside closure are grouped with parentheses.
+     * <pre>{@code
+     * .where(User_.IS_ACTIVE.eq(true))
+     * .and(q -> q.where(User_.ROLE.eq("ADMIN")).or(User_.ROLE.eq("MOD")))
+     * // SQL: WHERE is_active = true AND (role = 'ADMIN' OR role = 'MOD')
+     *
+     * // With EXISTS
+     * .and(q -> q.where(App_.TYPE.ne("SIMPLE")).orExists(modelsSubquery))
+     * // SQL: AND (type != 'SIMPLE' OR EXISTS (...))
+     * }</pre>
+     */
+    public SelectBuilder and(Function<SelectBuilder, SelectBuilder> group) {
+        SelectBuilder nested = new SelectBuilder(List.of());
+        nested = group.apply(nested);
+        Predicate groupedPredicate = nested.getWhereClause();
+        if (nonNull(groupedPredicate)) {
+            if (isNull(this.whereClause)) {
+                this.whereClause = groupedPredicate;
+            } else {
+                this.whereClause = this.whereClause.and(groupedPredicate);
+            }
+        }
+        return this;
+    }
+
+    /**
      * Add AND condition only if value is present (not null).
      * <pre>{@code
      * .where(User_.IS_ACTIVE.eq(true))
@@ -243,7 +295,7 @@ public final class SelectBuilder {
      * .andIfPresent(minAge, () -> User_.AGE.gte(minAge))
      * }</pre>
      */
-    public <V> SelectBuilder andIfPresent(V value, java.util.function.Supplier<Predicate> predicateSupplier) {
+    public <V> SelectBuilder andIfPresent(V value, Supplier<Predicate> predicateSupplier) {
         if (nonNull(value)) {
             and(predicateSupplier.get());
         }
@@ -292,9 +344,32 @@ public final class SelectBuilder {
     }
 
     /**
+     * Add grouped OR condition using closure (Laravel-style).
+     * Conditions inside closure are grouped with parentheses.
+     * <pre>{@code
+     * .where(User_.TYPE.eq("PREMIUM"))
+     * .or(q -> q.where(User_.CREDITS.gt(100)).and(User_.VERIFIED.eq(true)))
+     * // SQL: WHERE type = 'PREMIUM' OR (credits > 100 AND verified = true)
+     * }</pre>
+     */
+    public SelectBuilder or(Function<SelectBuilder, SelectBuilder> group) {
+        SelectBuilder nested = new SelectBuilder(List.of());
+        nested = group.apply(nested);
+        Predicate groupedPredicate = nested.getWhereClause();
+        if (nonNull(groupedPredicate)) {
+            if (isNull(this.whereClause)) {
+                this.whereClause = groupedPredicate;
+            } else {
+                this.whereClause = this.whereClause.or(groupedPredicate);
+            }
+        }
+        return this;
+    }
+
+    /**
      * Add OR condition only if value is present (not null).
      */
-    public <V> SelectBuilder orIfPresent(V value, java.util.function.Supplier<Predicate> predicateSupplier) {
+    public <V> SelectBuilder orIfPresent(V value, Supplier<Predicate> predicateSupplier) {
         if (nonNull(value)) {
             or(predicateSupplier.get());
         }
@@ -458,7 +533,7 @@ public final class SelectBuilder {
      * // SQL: WHERE EXISTS (SELECT 1 FROM posts WHERE posts.user_id = users.id AND is_published = true)
      * }</pre>
      */
-    public SelectBuilder whereHas(Relation<?, ?> relation, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
+    public SelectBuilder whereHas(Relation<?, ?> relation, Function<SelectBuilder, SelectBuilder> constraint) {
         String ownerTable = getOwnerTableName(relation);
         Predicate existsPredicate = new Predicate.RelationExistsPredicate(relation, constraint, false, ownerTable);
 
@@ -484,7 +559,7 @@ public final class SelectBuilder {
     /**
      * Filter by non-existence of related records with additional constraints.
      */
-    public SelectBuilder whereDoesntHave(Relation<?, ?> relation, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
+    public SelectBuilder whereDoesntHave(Relation<?, ?> relation, Function<SelectBuilder, SelectBuilder> constraint) {
         String ownerTable = getOwnerTableName(relation);
         Predicate notExistsPredicate = new Predicate.RelationExistsPredicate(relation, constraint, true, ownerTable);
 
@@ -510,7 +585,7 @@ public final class SelectBuilder {
     /**
      * Filter by count of related records with additional constraints.
      */
-    public SelectBuilder has(Relation<?, ?> relation, String operator, int count, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
+    public SelectBuilder has(Relation<?, ?> relation, String operator, int count, Function<SelectBuilder, SelectBuilder> constraint) {
         String ownerTable = getOwnerTableName(relation);
         Predicate countPredicate = new Predicate.RelationCountPredicate(relation, operator, count, constraint, ownerTable);
 
@@ -555,7 +630,7 @@ public final class SelectBuilder {
      * .withCount(User_.POSTS, posts -> posts.where(Post_.IS_PUBLISHED.eq(true)), "published_count")
      * }</pre>
      */
-    public SelectBuilder withCount(Relation<?, ?> relation, java.util.function.Function<SelectBuilder, SelectBuilder> constraint, String alias) {
+    public SelectBuilder withCount(Relation<?, ?> relation, Function<SelectBuilder, SelectBuilder> constraint, String alias) {
         String ownerTable = getOwnerTableName(relation);
         this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.COUNT, relation, null, constraint, alias, ownerTable));
         return this;
@@ -581,7 +656,7 @@ public final class SelectBuilder {
     /**
      * Add a SUM subquery with constraint.
      */
-    public SelectBuilder withSum(Relation<?, ?> relation, Column<?, ?> column, String alias, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
+    public SelectBuilder withSum(Relation<?, ?> relation, Column<?, ?> column, String alias, Function<SelectBuilder, SelectBuilder> constraint) {
         String ownerTable = getOwnerTableName(relation);
         this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.SUM, relation, column, constraint, alias, ownerTable));
         return this;
@@ -603,7 +678,7 @@ public final class SelectBuilder {
     /**
      * Add an AVG subquery with constraint.
      */
-    public SelectBuilder withAvg(Relation<?, ?> relation, Column<?, ?> column, String alias, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
+    public SelectBuilder withAvg(Relation<?, ?> relation, Column<?, ?> column, String alias, Function<SelectBuilder, SelectBuilder> constraint) {
         String ownerTable = getOwnerTableName(relation);
         this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.AVG, relation, column, constraint, alias, ownerTable));
         return this;
@@ -625,7 +700,7 @@ public final class SelectBuilder {
     /**
      * Add a MIN subquery with constraint.
      */
-    public SelectBuilder withMin(Relation<?, ?> relation, Column<?, ?> column, String alias, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
+    public SelectBuilder withMin(Relation<?, ?> relation, Column<?, ?> column, String alias, Function<SelectBuilder, SelectBuilder> constraint) {
         String ownerTable = getOwnerTableName(relation);
         this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.MIN, relation, column, constraint, alias, ownerTable));
         return this;
@@ -647,7 +722,7 @@ public final class SelectBuilder {
     /**
      * Add a MAX subquery with constraint.
      */
-    public SelectBuilder withMax(Relation<?, ?> relation, Column<?, ?> column, String alias, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
+    public SelectBuilder withMax(Relation<?, ?> relation, Column<?, ?> column, String alias, Function<SelectBuilder, SelectBuilder> constraint) {
         String ownerTable = getOwnerTableName(relation);
         this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.MAX, relation, column, constraint, alias, ownerTable));
         return this;
@@ -669,7 +744,7 @@ public final class SelectBuilder {
     /**
      * Add an EXISTS subquery with constraint.
      */
-    public SelectBuilder withExists(Relation<?, ?> relation, String alias, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
+    public SelectBuilder withExists(Relation<?, ?> relation, String alias, Function<SelectBuilder, SelectBuilder> constraint) {
         String ownerTable = getOwnerTableName(relation);
         this.selectItems.add(SelectItem.subquery(SelectItem.SubqueryType.EXISTS, relation, null, constraint, alias, ownerTable));
         return this;
@@ -1105,6 +1180,40 @@ public final class SelectBuilder {
     }
 
     /**
+     * Add OR EXISTS (subquery) to WHERE clause.
+     * <pre>{@code
+     * .where(User_.IS_ACTIVE.eq(true))
+     * .orExists(Suprim.selectRaw("1").from(Order_.TABLE).whereRaw("user_id = users.id"))
+     * // SQL: WHERE is_active = true OR EXISTS (SELECT 1 FROM orders WHERE ...)
+     * }</pre>
+     */
+    public SelectBuilder orExists(SelectBuilder subquery) {
+        if (isNull(this.whereClause)) {
+            this.whereClause = SubqueryExpression.exists(subquery);
+        } else {
+            this.whereClause = this.whereClause.or(SubqueryExpression.exists(subquery));
+        }
+        return this;
+    }
+
+    /**
+     * Add OR NOT EXISTS (subquery) to WHERE clause.
+     * <pre>{@code
+     * .where(User_.IS_ADMIN.eq(true))
+     * .orNotExists(Suprim.selectRaw("1").from(Ban_.TABLE).whereRaw("user_id = users.id"))
+     * // SQL: WHERE is_admin = true OR NOT EXISTS (SELECT 1 FROM bans WHERE ...)
+     * }</pre>
+     */
+    public SelectBuilder orNotExists(SelectBuilder subquery) {
+        if (isNull(this.whereClause)) {
+            this.whereClause = SubqueryExpression.notExists(subquery);
+        } else {
+            this.whereClause = this.whereClause.or(SubqueryExpression.notExists(subquery));
+        }
+        return this;
+    }
+
+    /**
      * Add WHERE column IN (subquery).
      * <pre>{@code
      * .whereInSubquery(User_.ID, Suprim.select(Order_.USER_ID).from(Order_.TABLE))
@@ -1261,7 +1370,7 @@ public final class SelectBuilder {
      *     .limit(5))
      * }</pre>
      */
-    public SelectBuilder with(Relation<?, ?> relation, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
+    public SelectBuilder with(Relation<?, ?> relation, Function<SelectBuilder, SelectBuilder> constraint) {
         eagerLoads.add(EagerLoadSpec.of(relation, constraint));
         return this;
     }
@@ -1333,7 +1442,7 @@ public final class SelectBuilder {
      * @param constraint constraint to apply to the final relation
      * @return this builder
      */
-    public SelectBuilder with(String path, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
+    public SelectBuilder with(String path, Function<SelectBuilder, SelectBuilder> constraint) {
         if (Objects.isNull(fromTable)) {
             throw new IllegalStateException("Cannot resolve string paths without FROM table. Call .from() first.");
         }
@@ -1356,7 +1465,7 @@ public final class SelectBuilder {
      * @param constraint constraint to apply
      * @return this builder
      */
-    public SelectBuilder with(Relation<?, ?> relation, String nestedPath, java.util.function.Function<SelectBuilder, SelectBuilder> constraint) {
+    public SelectBuilder with(Relation<?, ?> relation, String nestedPath, Function<SelectBuilder, SelectBuilder> constraint) {
         EagerLoadSpec spec = PathResolver.resolveNested(relation, nestedPath, constraint);
         eagerLoads.add(spec);
         return this;
