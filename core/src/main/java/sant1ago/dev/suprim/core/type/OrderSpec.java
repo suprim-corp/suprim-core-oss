@@ -1,5 +1,6 @@
 package sant1ago.dev.suprim.core.type;
 
+import sant1ago.dev.suprim.core.dialect.PostgreSqlDialect;
 import sant1ago.dev.suprim.core.dialect.SqlDialect;
 
 import static java.util.Objects.nonNull;
@@ -25,6 +26,16 @@ public record OrderSpec(Column<?, ?> column, OrderDirection direction, String ra
      */
     public static OrderSpec raw(String rawSql) {
         return new OrderSpec(null, null, rawSql);
+    }
+
+    /**
+     * Create an OrderSpec from an expression and direction.
+     */
+    public static OrderSpec of(Expression<?> expression, OrderDirection direction) {
+        if (expression instanceof Column<?, ?> col) {
+            return new OrderSpec(col, direction, null);
+        }
+        return raw(expression.toSql(PostgreSqlDialect.INSTANCE) + " " + direction.name());
     }
 
     /**
