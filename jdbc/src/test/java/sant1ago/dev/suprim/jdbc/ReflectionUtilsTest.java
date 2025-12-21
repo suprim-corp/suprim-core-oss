@@ -99,12 +99,7 @@ class ReflectionUtilsTest {
     // Record for testing record accessor
     record TestRecord(String name, int value) {}
 
-    // Exact copy of user's Account entity
-    @Data
-    @lombok.experimental.SuperBuilder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @lombok.EqualsAndHashCode
+    // Exact copy of user's Account entity - with manual getters/setters for compilation
     static class Account {
         private UUID id;
         private java.time.OffsetDateTime createdAt;
@@ -118,6 +113,33 @@ class ReflectionUtilsTest {
         private java.util.Map<String, Object> idp;
         private UUID lastActiveWorkspace;
         private boolean enabled;
+
+        public Account() {}
+
+        public UUID getId() { return id; }
+        public void setId(UUID id) { this.id = id; }
+        public java.time.OffsetDateTime getCreatedAt() { return createdAt; }
+        public void setCreatedAt(java.time.OffsetDateTime createdAt) { this.createdAt = createdAt; }
+        public java.time.OffsetDateTime getUpdatedAt() { return updatedAt; }
+        public void setUpdatedAt(java.time.OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
+        public java.time.LocalDateTime getDeletedAt() { return deletedAt; }
+        public void setDeletedAt(java.time.LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
+        public UUID getDeletedBy() { return deletedBy; }
+        public void setDeletedBy(UUID deletedBy) { this.deletedBy = deletedBy; }
+        public String getUsername() { return username; }
+        public void setUsername(String username) { this.username = username; }
+        public String getPassword() { return password; }
+        public void setPassword(String password) { this.password = password; }
+        public String getProvider() { return provider; }
+        public void setProvider(String provider) { this.provider = provider; }
+        public java.util.Map<String, Object> getMetaData() { return metaData; }
+        public void setMetaData(java.util.Map<String, Object> metaData) { this.metaData = metaData; }
+        public java.util.Map<String, Object> getIdp() { return idp; }
+        public void setIdp(java.util.Map<String, Object> idp) { this.idp = idp; }
+        public UUID getLastActiveWorkspace() { return lastActiveWorkspace; }
+        public void setLastActiveWorkspace(UUID lastActiveWorkspace) { this.lastActiveWorkspace = lastActiveWorkspace; }
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
     }
 
     // ==================== GET FIELD VALUE TESTS ====================
@@ -1323,6 +1345,134 @@ class ReflectionUtilsTest {
 
             public String getInstanceField() { return instanceField; }
             public void setInstanceField(String instanceField) { this.instanceField = instanceField; }
+        }
+    }
+
+    // ==================== isJsonbValue TESTS ====================
+
+    @Nested
+    @DisplayName("isJsonbValue Tests")
+    class IsJsonbValueTests {
+
+        @Test
+        @DisplayName("isJsonbValue returns false for null")
+        void testIsJsonbValue_null_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ReflectionUtils.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            boolean result = (boolean) method.invoke(null, (Object) null);
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns false for non-PGobject")
+        void testIsJsonbValue_nonPGobject_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ReflectionUtils.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            boolean result = (boolean) method.invoke(null, "not a PGobject");
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns true for PGobject with jsonb type")
+        void testIsJsonbValue_pgObjectJsonb_returnsTrue() throws Exception {
+            java.lang.reflect.Method method = ReflectionUtils.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            org.postgresql.util.PGobject pgObject = new org.postgresql.util.PGobject();
+            pgObject.setType("jsonb");
+            pgObject.setValue("{\"key\":\"value\"}");
+
+            boolean result = (boolean) method.invoke(null, pgObject);
+            assertTrue(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns true for PGobject with json type")
+        void testIsJsonbValue_pgObjectJson_returnsTrue() throws Exception {
+            java.lang.reflect.Method method = ReflectionUtils.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            org.postgresql.util.PGobject pgObject = new org.postgresql.util.PGobject();
+            pgObject.setType("json");
+            pgObject.setValue("[1, 2, 3]");
+
+            boolean result = (boolean) method.invoke(null, pgObject);
+            assertTrue(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns false for PGobject with non-json type")
+        void testIsJsonbValue_pgObjectUuid_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ReflectionUtils.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            org.postgresql.util.PGobject pgObject = new org.postgresql.util.PGobject();
+            pgObject.setType("uuid");
+            pgObject.setValue("550e8400-e29b-41d4-a716-446655440000");
+
+            boolean result = (boolean) method.invoke(null, pgObject);
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns false for PGobject with text type")
+        void testIsJsonbValue_pgObjectText_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ReflectionUtils.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            org.postgresql.util.PGobject pgObject = new org.postgresql.util.PGobject();
+            pgObject.setType("text");
+            pgObject.setValue("plain text");
+
+            boolean result = (boolean) method.invoke(null, pgObject);
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns false when PGobject reflection fails")
+        void testIsJsonbValue_pgObjectReflectionFailure_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ReflectionUtils.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            // Use a broken PGobject that throws on getType()
+            org.postgresql.util.PGobject brokenPgObject = org.postgresql.util.PGobject.createBroken();
+
+            boolean result = (boolean) method.invoke(null, brokenPgObject);
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue handles Integer (non-PGobject) correctly")
+        void testIsJsonbValue_integer_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ReflectionUtils.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            boolean result = (boolean) method.invoke(null, Integer.valueOf(42));
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue handles Map (non-PGobject) correctly")
+        void testIsJsonbValue_map_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ReflectionUtils.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            java.util.Map<String, Object> map = new java.util.HashMap<>();
+            map.put("key", "value");
+
+            boolean result = (boolean) method.invoke(null, map);
+            assertFalse(result);
         }
     }
 }

@@ -208,6 +208,10 @@ final class EntityReflector {
                                 "Invalid UUID format for column '" + column.name() + "': " + str, e);
                         }
                     }
+                    // Convert to PGobject for SqlType.VECTOR columns (pgvector)
+                    if (column.type() == SqlType.VECTOR) {
+                        value = toVectorObject(value);
+                    }
                     columnMap.put(column.name(), value);
                 }
             }
@@ -229,6 +233,89 @@ final class EntityReflector {
         } catch (Exception e) {
             throw new IllegalArgumentException("Failed to convert value to JSONB: " + value, e);
         }
+    }
+
+    /**
+     * Convert a value to PostgreSQL VECTOR PGobject (pgvector extension).
+     * Accepts String (e.g., "[0.1, 0.2, 0.3]"), float[], double[], or List of Numbers.
+     * Package-private for use by EntityPersistence.
+     *
+     * @param value the vector value (String, float[], double[], or List)
+     * @return PGobject with type "vector"
+     */
+    static PGobject toVectorObject(Object value) {
+        try {
+            PGobject pgObject = new PGobject();
+            pgObject.setType("vector");
+
+            String vectorString;
+            if (value instanceof String str) {
+                // Already in vector format "[0.1, 0.2, ...]"
+                vectorString = str;
+            } else if (value instanceof float[] floatArray) {
+                vectorString = floatArrayToVectorString(floatArray);
+            } else if (value instanceof double[] doubleArray) {
+                vectorString = doubleArrayToVectorString(doubleArray);
+            } else if (value instanceof List<?> list) {
+                vectorString = listToVectorString(list);
+            } else {
+                throw new IllegalArgumentException(
+                    "Unsupported vector type: " + value.getClass().getName() +
+                    ". Expected String, float[], double[], or List<Number>.");
+            }
+            pgObject.setValue(vectorString);
+            return pgObject;
+        } catch (SQLException e) {
+            throw new IllegalArgumentException("Failed to set vector value: " + value, e);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to convert value to VECTOR: " + value, e);
+        }
+    }
+
+    /**
+     * Convert float[] to pgvector string format "[0.1, 0.2, ...]"
+     */
+    private static String floatArrayToVectorString(float[] array) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < array.length; i++) {
+            if (i > 0) sb.append(",");
+            sb.append(array[i]);
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    /**
+     * Convert double[] to pgvector string format "[0.1, 0.2, ...]"
+     */
+    private static String doubleArrayToVectorString(double[] array) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < array.length; i++) {
+            if (i > 0) sb.append(",");
+            sb.append(array[i]);
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    /**
+     * Convert List to pgvector string format "[0.1, 0.2, ...]"
+     */
+    private static String listToVectorString(List<?> list) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) sb.append(",");
+            Object item = list.get(i);
+            if (item instanceof Number num) {
+                sb.append(num.doubleValue());
+            } else {
+                throw new IllegalArgumentException("List must contain Number elements, got: " + item.getClass());
+            }
+        }
+        sb.append("]");
+        return sb.toString();
     }
 
     /**

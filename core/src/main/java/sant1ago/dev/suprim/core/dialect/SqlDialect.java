@@ -54,6 +54,16 @@ public interface SqlDialect {
     }
 
     /**
+     * Get current timestamp function.
+     * PostgreSQL/MySQL: NOW()
+     *
+     * @return current timestamp SQL function
+     */
+    default String currentTimestampFunction() {
+        return "NOW()";
+    }
+
+    /**
      * Get dialect name for identification.
      *
      * @return dialect name

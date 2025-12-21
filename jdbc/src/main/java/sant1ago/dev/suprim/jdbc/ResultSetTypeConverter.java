@@ -63,7 +63,16 @@ final class ResultSetTypeConverter {
             return convertToEnum(value, type);
         }
 
-        // JSON/JSONB to Map conversion
+        // JSON/JSONB conversion
+        // Case 1: PGobject (PostgreSQL JSONB) - can be converted to any type (Map, List, or POJO)
+        if (isJsonbValue(value)) {
+            Object jsonResult = convertFromJson(value, type);
+            if (Objects.nonNull(jsonResult)) {
+                return jsonResult;
+            }
+        }
+
+        // Case 2: Plain JSON string - only convert to Map or Object (backward compatibility)
         if (Map.class.isAssignableFrom(type) || type == Object.class) {
             Object jsonResult = convertFromJson(value, type);
             if (Objects.nonNull(jsonResult)) {
@@ -72,6 +81,25 @@ final class ResultSetTypeConverter {
         }
 
         return value;
+    }
+
+    /**
+     * Check if value is a PostgreSQL PGobject with jsonb/json type.
+     */
+    private static boolean isJsonbValue(Object value) {
+        if (Objects.isNull(value)) {
+            return false;
+        }
+        if (value.getClass().getName().equals("org.postgresql.util.PGobject")) {
+            try {
+                Method getType = value.getClass().getMethod("getType");
+                String pgType = (String) getType.invoke(value);
+                return "jsonb".equals(pgType) || "json".equals(pgType);
+            } catch (Exception e) {
+                return false;
+            }
+        }
+        return false;
     }
 
     /**

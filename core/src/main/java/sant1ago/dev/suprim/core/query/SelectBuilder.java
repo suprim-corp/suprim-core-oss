@@ -895,6 +895,14 @@ public final class SelectBuilder {
         return this;
     }
 
+    /**
+     * Clear all ORDER BY clauses.
+     */
+    public SelectBuilder clearOrders() {
+        orderSpecs.clear();
+        return this;
+    }
+
     // ==================== GROUP BY ====================
 
     /**
@@ -937,6 +945,58 @@ public final class SelectBuilder {
      */
     public SelectBuilder having(Predicate predicate) {
         this.havingClause = predicate;
+        return this;
+    }
+
+    /**
+     * Add raw SQL HAVING condition.
+     */
+    public SelectBuilder havingRaw(String rawSql) {
+        Predicate rawPredicate = new Predicate.RawPredicate(rawSql);
+        if (isNull(this.havingClause)) {
+            this.havingClause = rawPredicate;
+        } else {
+            this.havingClause = this.havingClause.and(rawPredicate);
+        }
+        return this;
+    }
+
+    /**
+     * Add raw SQL HAVING condition with parameters.
+     */
+    public SelectBuilder havingRaw(String rawSql, Map<String, Object> params) {
+        Predicate rawPredicate = new Predicate.ParameterizedRawPredicate(rawSql, params);
+        if (isNull(this.havingClause)) {
+            this.havingClause = rawPredicate;
+        } else {
+            this.havingClause = this.havingClause.and(rawPredicate);
+        }
+        return this;
+    }
+
+    /**
+     * Add raw SQL OR HAVING condition.
+     */
+    public SelectBuilder orHavingRaw(String rawSql) {
+        Predicate rawPredicate = new Predicate.RawPredicate(rawSql);
+        if (isNull(this.havingClause)) {
+            this.havingClause = rawPredicate;
+        } else {
+            this.havingClause = this.havingClause.or(rawPredicate);
+        }
+        return this;
+    }
+
+    /**
+     * Add raw SQL OR HAVING condition with parameters.
+     */
+    public SelectBuilder orHavingRaw(String rawSql, Map<String, Object> params) {
+        Predicate rawPredicate = new Predicate.ParameterizedRawPredicate(rawSql, params);
+        if (isNull(this.havingClause)) {
+            this.havingClause = rawPredicate;
+        } else {
+            this.havingClause = this.havingClause.or(rawPredicate);
+        }
         return this;
     }
 

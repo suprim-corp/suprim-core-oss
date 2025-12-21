@@ -1321,6 +1321,214 @@ class ResultSetTypeConverterTest {
     }
 
     /**
+     * Tests for isJsonbValue() private method.
+     * This method checks if a value is a PostgreSQL PGobject with json/jsonb type.
+     */
+    @Nested
+    @DisplayName("isJsonbValue Tests")
+    class IsJsonbValueTests {
+
+        @Test
+        @DisplayName("isJsonbValue returns false for null")
+        void testIsJsonbValue_null_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ResultSetTypeConverter.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            boolean result = (boolean) method.invoke(null, (Object) null);
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns false for String")
+        void testIsJsonbValue_string_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ResultSetTypeConverter.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            boolean result = (boolean) method.invoke(null, "not a PGobject");
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns true for PGobject with jsonb type")
+        void testIsJsonbValue_pgObjectJsonb_returnsTrue() throws Exception {
+            java.lang.reflect.Method method = ResultSetTypeConverter.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            org.postgresql.util.PGobject pgObject = new org.postgresql.util.PGobject();
+            pgObject.setType("jsonb");
+            pgObject.setValue("{\"key\":\"value\"}");
+
+            boolean result = (boolean) method.invoke(null, pgObject);
+            assertTrue(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns true for PGobject with json type")
+        void testIsJsonbValue_pgObjectJson_returnsTrue() throws Exception {
+            java.lang.reflect.Method method = ResultSetTypeConverter.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            org.postgresql.util.PGobject pgObject = new org.postgresql.util.PGobject();
+            pgObject.setType("json");
+            pgObject.setValue("[1, 2, 3]");
+
+            boolean result = (boolean) method.invoke(null, pgObject);
+            assertTrue(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns false for PGobject with uuid type")
+        void testIsJsonbValue_pgObjectUuid_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ResultSetTypeConverter.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            org.postgresql.util.PGobject pgObject = new org.postgresql.util.PGobject();
+            pgObject.setType("uuid");
+            pgObject.setValue("550e8400-e29b-41d4-a716-446655440000");
+
+            boolean result = (boolean) method.invoke(null, pgObject);
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns false for PGobject with text type")
+        void testIsJsonbValue_pgObjectText_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ResultSetTypeConverter.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            org.postgresql.util.PGobject pgObject = new org.postgresql.util.PGobject();
+            pgObject.setType("text");
+            pgObject.setValue("plain text");
+
+            boolean result = (boolean) method.invoke(null, pgObject);
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns false for Integer")
+        void testIsJsonbValue_integer_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ResultSetTypeConverter.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            boolean result = (boolean) method.invoke(null, Integer.valueOf(42));
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns false for Map")
+        void testIsJsonbValue_map_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ResultSetTypeConverter.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            java.util.Map<String, Object> map = new java.util.HashMap<>();
+            map.put("key", "value");
+
+            boolean result = (boolean) method.invoke(null, map);
+            assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("isJsonbValue returns false when PGobject reflection fails")
+        void testIsJsonbValue_pgObjectReflectionFailure_returnsFalse() throws Exception {
+            java.lang.reflect.Method method = ResultSetTypeConverter.class.getDeclaredMethod(
+                "isJsonbValue", Object.class);
+            method.setAccessible(true);
+
+            // Use a broken PGobject that throws on getType()
+            org.postgresql.util.PGobject brokenPgObject = org.postgresql.util.PGobject.createBroken();
+
+            boolean result = (boolean) method.invoke(null, brokenPgObject);
+            assertFalse(result);
+        }
+    }
+
+    /**
+     * Tests for PGobject JSONB to POJO conversion.
+     * Tests the Case 1 path in getValue() where PGobject jsonb can be converted to any type.
+     */
+    @Nested
+    @DisplayName("PGobject JSONB to POJO Conversion Tests")
+    class PGobjectJsonbToPojoTests {
+
+        @Test
+        @DisplayName("PGobject jsonb converts to POJO correctly")
+        void getValue_pgObjectJsonb_convertsToPojo() throws Exception {
+            org.postgresql.util.PGobject pgObject = new org.postgresql.util.PGobject();
+            pgObject.setType("jsonb");
+            pgObject.setValue("{\"name\":\"test\",\"value\":42}");
+
+            ResultSet rs = mock(ResultSet.class);
+            when(rs.getObject(1)).thenReturn(pgObject);
+            when(rs.wasNull()).thenReturn(false);
+
+            // Convert to a simple POJO class
+            Object result = ResultSetTypeConverter.getValue(rs, 1, TestPojo.class);
+            assertInstanceOf(TestPojo.class, result);
+            TestPojo pojo = (TestPojo) result;
+            assertEquals("test", pojo.getName());
+            assertEquals(42, pojo.getValue());
+        }
+
+        @Test
+        @DisplayName("PGobject json (not jsonb) converts to POJO correctly")
+        void getValue_pgObjectJson_convertsToPojo() throws Exception {
+            org.postgresql.util.PGobject pgObject = new org.postgresql.util.PGobject();
+            pgObject.setType("json");
+            pgObject.setValue("{\"name\":\"json-test\",\"value\":99}");
+
+            ResultSet rs = mock(ResultSet.class);
+            when(rs.getObject(1)).thenReturn(pgObject);
+            when(rs.wasNull()).thenReturn(false);
+
+            Object result = ResultSetTypeConverter.getValue(rs, 1, TestPojo.class);
+            assertInstanceOf(TestPojo.class, result);
+            TestPojo pojo = (TestPojo) result;
+            assertEquals("json-test", pojo.getName());
+            assertEquals(99, pojo.getValue());
+        }
+
+        @Test
+        @DisplayName("PGobject jsonb converts to List correctly")
+        void getValue_pgObjectJsonb_convertToList() throws Exception {
+            org.postgresql.util.PGobject pgObject = new org.postgresql.util.PGobject();
+            pgObject.setType("jsonb");
+            pgObject.setValue("[\"a\", \"b\", \"c\"]");
+
+            ResultSet rs = mock(ResultSet.class);
+            when(rs.getObject(1)).thenReturn(pgObject);
+            when(rs.wasNull()).thenReturn(false);
+
+            Object result = ResultSetTypeConverter.getValue(rs, 1, java.util.List.class);
+            assertInstanceOf(java.util.List.class, result);
+            @SuppressWarnings("unchecked")
+            java.util.List<String> list = (java.util.List<String>) result;
+            assertEquals(3, list.size());
+            assertEquals("a", list.get(0));
+        }
+
+        // Test POJO for JSON conversion
+        public static class TestPojo {
+            private String name;
+            private int value;
+
+            public TestPojo() {}
+
+            public String getName() { return name; }
+            public void setName(String name) { this.name = name; }
+            public int getValue() { return value; }
+            public void setValue(int value) { this.value = value; }
+        }
+    }
+
+    /**
      * Tests for Jackson 2.x fallback path via reflection.
      * These tests directly call the private parseJsonWithJackson2 method
      * to ensure it works correctly for users who don't have Jackson 3.x.

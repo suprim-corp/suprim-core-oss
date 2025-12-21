@@ -132,7 +132,8 @@ public final class ReflectionUtils {
     }
 
     private static Object getFieldValueInternal(Object entity, Class<?> clazz, String fieldName) {
-        String cacheKey = clazz.getName() + "#get#" + fieldName;
+        // Include classloader identity hash to handle Spring Boot DevTools restart classloader
+        String cacheKey = System.identityHashCode(clazz.getClassLoader()) + "#" + clazz.getName() + "#get#" + fieldName;
 
         MethodHandle getter = GETTER_CACHE.computeIfAbsent(cacheKey, k -> findGetter(clazz, fieldName));
 
@@ -295,9 +296,17 @@ public final class ReflectionUtils {
     }
 
     private static boolean setFieldValueInternal(Object entity, Class<?> clazz, String fieldName, Object value) {
-        String cacheKey = clazz.getName() + "#set#" + fieldName + "#" + (Objects.isNull(value) ? "null" : value.getClass().getName());
+        // Include classloader identity hash to handle Spring Boot DevTools restart classloader
+        String cacheKey = System.identityHashCode(clazz.getClassLoader()) + "#" + clazz.getName() + "#set#" + fieldName + "#" + (Objects.isNull(value) ? "null" : value.getClass().getName());
 
-        MethodHandle setter = SETTER_CACHE.computeIfAbsent(cacheKey, k -> findSetter(clazz, fieldName, value));
+        MethodHandle setter = SETTER_CACHE.computeIfAbsent(cacheKey, k -> {
+            MethodHandle handle = findSetter(clazz, fieldName, value);
+            if (Objects.isNull(handle)) {
+                LOGGER.warn("Suprim: No setter found for {}.{} (value type: {})",
+                    clazz.getSimpleName(), fieldName, Objects.isNull(value) ? "null" : value.getClass().getSimpleName());
+            }
+            return handle;
+        });
 
         if (Objects.isNull(setter)) {
             return false;
@@ -308,6 +317,7 @@ public final class ReflectionUtils {
             setter.invoke(entity, convertedValue);
             return true;
         } catch (Throwable e) {
+            LOGGER.warn("Suprim: Failed to invoke setter for {}.{}: {}", clazz.getSimpleName(), fieldName, e.getMessage());
             return false;
         }
     }
@@ -461,18 +471,22 @@ public final class ReflectionUtils {
         String capitalizedName = capitalize(fieldName);
         String setterName = "set" + capitalizedName;
 
+        LOGGER.debug("Suprim: Looking for setter {} on {}", setterName, clazz.getSimpleName());
+
         for (Method method : clazz.getMethods()) {
             if (method.getName().equals(setterName) && method.getParameterCount() == 1) {
+                LOGGER.debug("Suprim: Found setter method: {}", method);
                 Class<?> paramType = method.getParameterTypes()[0];
                 Class<?> valueType = Objects.isNull(value) ? null : value.getClass();
 
-                // Check type compatibility: null, assignable, boxed, numeric widening, UUID/String, same-class-different-loader
+                // Check type compatibility: null, assignable, boxed, numeric widening, UUID/String, same-class-different-loader, JSONB
                 boolean typeMatch = Objects.isNull(value) ||
                     paramType.isAssignableFrom(valueType) ||
                     isBoxedMatch(paramType, valueType) ||
                     isNumericWideningMatch(paramType, valueType) ||
                     isUuidStringMatch(paramType, valueType) ||
-                    isSameClassDifferentLoader(paramType, valueType);
+                    isSameClassDifferentLoader(paramType, valueType) ||
+                    isJsonbValue(value);  // JSONB can be converted to any POJO
 
                 if (!typeMatch) {
                     // Throw error on type mismatch - strict mode
@@ -485,16 +499,50 @@ public final class ReflectionUtils {
                 try {
                     return getPrivateLookup(clazz).unreflect(method);
                 } catch (IllegalAccessException e) {
-                    LOGGER.debug("Suprim: privateLookup failed for {}.{}: {}", clazz.getSimpleName(), setterName, e.getMessage());
+                    LOGGER.warn("Suprim: privateLookup.unreflect failed for {}.{}: {}", clazz.getSimpleName(), setterName, e.getMessage());
                     try {
                         return MethodHandles.publicLookup().unreflect(method);
                     } catch (IllegalAccessException ex) {
-                        LOGGER.debug("Suprim: publicLookup also failed for {}.{}: {}", clazz.getSimpleName(), setterName, ex.getMessage());
+                        LOGGER.warn("Suprim: publicLookup.unreflect also failed for {}.{}: {}", clazz.getSimpleName(), setterName, ex.getMessage());
+                        // Fallback: wrap Method.invoke() for cross-module access in Java 9+
+                        LOGGER.info("Suprim: Attempting Method.invoke() fallback for {}.{}", clazz.getSimpleName(), setterName);
+                        MethodHandle fallback = createMethodSetter(method);
+                        if (Objects.nonNull(fallback)) {
+                            LOGGER.info("Suprim: Method.invoke() fallback succeeded for {}.{}", clazz.getSimpleName(), setterName);
+                        } else {
+                            LOGGER.warn("Suprim: Method.invoke() fallback FAILED for {}.{}", clazz.getSimpleName(), setterName);
+                        }
+                        return fallback;
                     }
                 }
             }
         }
         return null;
+    }
+
+    /**
+     * Create a MethodHandle wrapper around Method.invoke() for cross-module access.
+     * Works across module boundaries where unreflect() fails.
+     */
+    private static MethodHandle createMethodSetter(Method method) {
+        try {
+            method.setAccessible(true);
+            // Find the invoke method: Method.invoke(Object target, Object... args)
+            MethodHandle invoker = MethodHandles.lookup().findVirtual(
+                Method.class, "invoke",
+                MethodType.methodType(Object.class, Object.class, Object[].class)
+            );
+            // Bind the method instance: now we have (Object target, Object[] args) -> Object
+            MethodHandle bound = invoker.bindTo(method);
+            // Use asCollector to convert (Object target, Object value) to (Object target, Object[] args)
+            // This collects the last 1 argument into an Object[]
+            MethodHandle collector = bound.asCollector(Object[].class, 1);
+            // Adjust return type from Object to void (setters return void)
+            return collector.asType(MethodType.methodType(void.class, Object.class, Object.class));
+        } catch (Exception e) {
+            LOGGER.debug("Suprim: createMethodSetter failed: {}", e.getMessage());
+            return null;
+        }
     }
 
     private static MethodHandle findPublicFieldSetter(Class<?> clazz, String fieldName) {
@@ -507,13 +555,17 @@ public final class ReflectionUtils {
     }
 
     private static MethodHandle findPrivateFieldSetter(Class<?> clazz, String fieldName) {
+        LOGGER.debug("Suprim: findPrivateFieldSetter for {}.{}, strictMode={}", clazz.getSimpleName(), fieldName, strictMode);
+
         if (strictMode) {
+            LOGGER.warn("Suprim: strictMode is ON, skipping private field setter for {}.{}", clazz.getSimpleName(), fieldName);
             return null;
         }
 
         try {
             Field field = findDeclaredField(clazz, fieldName);
             if (Objects.isNull(field)) {
+                LOGGER.warn("Suprim: Field not found: {}.{}", clazz.getSimpleName(), fieldName);
                 return null;
             }
 
@@ -565,7 +617,8 @@ public final class ReflectionUtils {
             return null;
         }
 
-        String cacheKey = clazz.getName() + "#field#" + fieldName;
+        // Include classloader identity hash to handle Spring Boot DevTools restart classloader
+        String cacheKey = System.identityHashCode(clazz.getClassLoader()) + "#" + clazz.getName() + "#field#" + fieldName;
         return FIELD_CACHE.computeIfAbsent(cacheKey, k -> findDeclaredField(clazz, fieldName));
     }
 
@@ -654,6 +707,26 @@ public final class ReflectionUtils {
             return false; // Same class object, already handled by isAssignableFrom
         }
         return paramType.getName().equals(valueType.getName());
+    }
+
+    /**
+     * Check if value is a PostgreSQL PGobject with jsonb/json type.
+     * JSONB values can be deserialized to any POJO type.
+     */
+    private static boolean isJsonbValue(Object value) {
+        if (Objects.isNull(value)) {
+            return false;
+        }
+        if (value.getClass().getName().equals("org.postgresql.util.PGobject")) {
+            try {
+                Method getType = value.getClass().getMethod("getType");
+                String pgType = (String) getType.invoke(value);
+                return "jsonb".equals(pgType) || "json".equals(pgType);
+            } catch (Exception e) {
+                return false;
+            }
+        }
+        return false;
     }
 
     private static String capitalize(String str) {

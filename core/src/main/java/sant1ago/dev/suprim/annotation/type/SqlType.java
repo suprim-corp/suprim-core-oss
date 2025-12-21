@@ -184,6 +184,13 @@ public enum SqlType {
     /** Date range. */
     DATERANGE("DATERANGE"),
 
+    // ==================== VECTOR TYPES (pgvector) ====================
+    /**
+     * Vector type for embeddings (PostgreSQL pgvector extension).
+     * Use length attribute for dimension, e.g., @Column(type = SqlType.VECTOR, length = 1536)
+     */
+    VECTOR("VECTOR"),
+
     // ==================== OTHER ====================
     /** XML data. */
     XML("XML"),
