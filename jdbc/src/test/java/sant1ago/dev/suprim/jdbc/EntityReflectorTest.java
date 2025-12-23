@@ -3,13 +3,17 @@ package sant1ago.dev.suprim.jdbc;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.postgresql.util.PGobject;
 import sant1ago.dev.suprim.annotation.entity.Column;
 import sant1ago.dev.suprim.annotation.entity.Entity;
 import sant1ago.dev.suprim.annotation.entity.Id;
 import sant1ago.dev.suprim.annotation.entity.Table;
 import sant1ago.dev.suprim.annotation.type.SqlType;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -133,6 +137,31 @@ class EntityReflectorTest {
         public void setId(java.util.UUID id) { this.id = id; }
         public java.util.UUID getExternalId() { return externalId; }
         public void setExternalId(java.util.UUID externalId) { this.externalId = externalId; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+    }
+
+    /**
+     * Entity with @Column specifying SqlType.VECTOR for embedding storage.
+     */
+    @Entity(table = "vector_entities")
+    static class VectorColumnEntity {
+        @Id
+        @Column(name = "id")
+        private Long id;
+
+        @Column(name = "embedding", type = SqlType.VECTOR, length = 1536)
+        private String embedding;
+
+        @Column(name = "name")
+        private String name;
+
+        public VectorColumnEntity() {}
+
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+        public String getEmbedding() { return embedding; }
+        public void setEmbedding(String embedding) { this.embedding = embedding; }
         public String getName() { return name; }
         public void setName(String name) { this.name = name; }
     }
@@ -722,6 +751,177 @@ class EntityReflectorTest {
             EntityReflector.setFieldByColumnName(entity, "name", "test-name");
 
             assertEquals("test-name", entity.getName());
+        }
+    }
+
+    // ==================== VECTOR TYPE TESTS ====================
+
+    @Nested
+    @DisplayName("toVectorObject Tests")
+    class ToVectorObjectTests {
+
+        @Test
+        @DisplayName("String value converts to PGobject with type vector")
+        void toVectorObject_stringValue_convertsToPGobject() {
+            String vectorString = "[0.1, 0.2, 0.3]";
+            PGobject result = EntityReflector.toVectorObject(vectorString);
+
+            assertEquals("vector", result.getType());
+            assertEquals("[0.1, 0.2, 0.3]", result.getValue());
+        }
+
+        @Test
+        @DisplayName("float[] converts to vector string format")
+        void toVectorObject_floatArray_convertsCorrectly() {
+            float[] vector = {0.1f, 0.2f, 0.3f};
+            PGobject result = EntityReflector.toVectorObject(vector);
+
+            assertEquals("vector", result.getType());
+            assertEquals("[0.1,0.2,0.3]", result.getValue());
+        }
+
+        @Test
+        @DisplayName("double[] converts to vector string format")
+        void toVectorObject_doubleArray_convertsCorrectly() {
+            double[] vector = {0.1, 0.2, 0.3};
+            PGobject result = EntityReflector.toVectorObject(vector);
+
+            assertEquals("vector", result.getType());
+            assertEquals("[0.1,0.2,0.3]", result.getValue());
+        }
+
+        @Test
+        @DisplayName("List<Float> converts to vector string format")
+        void toVectorObject_floatList_convertsCorrectly() {
+            List<Float> vector = Arrays.asList(0.1f, 0.2f, 0.3f);
+            PGobject result = EntityReflector.toVectorObject(vector);
+
+            assertEquals("vector", result.getType());
+            // Float values converted via doubleValue()
+            assertTrue(result.getValue().startsWith("[0."));
+        }
+
+        @Test
+        @DisplayName("List<Double> converts to vector string format")
+        void toVectorObject_doubleList_convertsCorrectly() {
+            List<Double> vector = Arrays.asList(0.1, 0.2, 0.3);
+            PGobject result = EntityReflector.toVectorObject(vector);
+
+            assertEquals("vector", result.getType());
+            assertEquals("[0.1,0.2,0.3]", result.getValue());
+        }
+
+        @Test
+        @DisplayName("Empty float array produces empty vector")
+        void toVectorObject_emptyFloatArray_producesEmptyVector() {
+            float[] vector = {};
+            PGobject result = EntityReflector.toVectorObject(vector);
+
+            assertEquals("vector", result.getType());
+            assertEquals("[]", result.getValue());
+        }
+
+        @Test
+        @DisplayName("Empty double array produces empty vector")
+        void toVectorObject_emptyDoubleArray_producesEmptyVector() {
+            double[] vector = {};
+            PGobject result = EntityReflector.toVectorObject(vector);
+
+            assertEquals("vector", result.getType());
+            assertEquals("[]", result.getValue());
+        }
+
+        @Test
+        @DisplayName("Empty list produces empty vector")
+        void toVectorObject_emptyList_producesEmptyVector() {
+            List<Double> vector = new ArrayList<>();
+            PGobject result = EntityReflector.toVectorObject(vector);
+
+            assertEquals("vector", result.getType());
+            assertEquals("[]", result.getValue());
+        }
+
+        @Test
+        @DisplayName("Unsupported type throws IllegalArgumentException")
+        void toVectorObject_unsupportedType_throwsException() {
+            Integer unsupported = 123;
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
+                EntityReflector.toVectorObject(unsupported));
+
+            assertTrue(ex.getMessage().contains("Unsupported vector type"));
+            assertTrue(ex.getMessage().contains("Integer"));
+        }
+
+        @Test
+        @DisplayName("List with non-Number throws IllegalArgumentException")
+        void toVectorObject_listWithNonNumber_throwsException() {
+            List<String> invalidList = Arrays.asList("not", "numbers");
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
+                EntityReflector.toVectorObject(invalidList));
+
+            assertTrue(ex.getMessage().contains("Number"));
+        }
+
+        @Test
+        @DisplayName("Large vector array handles correctly")
+        void toVectorObject_largeArray_handlesCorrectly() {
+            // Simulate a 1536-dimension embedding (common for OpenAI embeddings)
+            float[] vector = new float[1536];
+            for (int i = 0; i < vector.length; i++) {
+                vector[i] = i * 0.001f;
+            }
+
+            PGobject result = EntityReflector.toVectorObject(vector);
+
+            assertEquals("vector", result.getType());
+            assertTrue(result.getValue().startsWith("[0.0,"));
+            assertTrue(result.getValue().endsWith("]"));
+            // Count commas to verify all elements are present
+            long commaCount = result.getValue().chars().filter(c -> c == ',').count();
+            assertEquals(1535, commaCount); // 1536 elements = 1535 commas
+        }
+    }
+
+    @Nested
+    @DisplayName("Vector Column Type Tests")
+    class VectorColumnTypeTests {
+
+        @Test
+        @DisplayName("Vector column returns VECTOR type")
+        void getColumnType_vectorColumn_returnsVectorType() {
+            SqlType result = EntityReflector.getColumnType(VectorColumnEntity.class, "embedding");
+            assertEquals(SqlType.VECTOR, result);
+        }
+
+        @Test
+        @DisplayName("toColumnMap converts vector field to PGobject")
+        void toColumnMap_vectorField_convertsToPGobject() {
+            VectorColumnEntity entity = new VectorColumnEntity();
+            entity.setId(1L);
+            entity.setEmbedding("[0.1, 0.2, 0.3]");
+            entity.setName("test");
+
+            Map<String, Object> result = EntityReflector.toColumnMap(entity);
+
+            assertTrue(result.containsKey("embedding"));
+            Object embeddingValue = result.get("embedding");
+            assertTrue(embeddingValue instanceof PGobject);
+            PGobject pgObject = (PGobject) embeddingValue;
+            assertEquals("vector", pgObject.getType());
+            assertEquals("[0.1, 0.2, 0.3]", pgObject.getValue());
+        }
+
+        @Test
+        @DisplayName("Null embedding not included in column map")
+        void toColumnMap_nullEmbedding_notIncluded() {
+            VectorColumnEntity entity = new VectorColumnEntity();
+            entity.setId(1L);
+            entity.setName("test");
+            // embedding is null
+
+            Map<String, Object> result = EntityReflector.toColumnMap(entity);
+
+            assertFalse(result.containsKey("embedding"));
         }
     }
 }

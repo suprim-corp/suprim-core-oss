@@ -284,6 +284,10 @@ final class EntityPersistence {
                             "Invalid UUID format for column '" + columnName + "': " + str, e);
                     }
                 }
+                // Convert to PGobject for SqlType.VECTOR columns (pgvector)
+                if (Objects.nonNull(column) && column.type() == SqlType.VECTOR) {
+                    value = EntityReflector.toVectorObject(value);
+                }
                 columns.put(columnName, value);
             }
         }

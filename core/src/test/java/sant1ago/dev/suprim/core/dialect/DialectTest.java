@@ -24,6 +24,7 @@ class DialectTest {
         assertTrue(caps.supportsNowait());
         assertTrue(caps.supportsFilterClause());
         assertTrue(caps.supportsDistinctOn());
+        assertTrue(caps.supportsVector());
     }
 
     @Test
@@ -39,6 +40,7 @@ class DialectTest {
         assertFalse(caps.supportsNowait());
         assertFalse(caps.supportsFilterClause());
         assertFalse(caps.supportsDistinctOn());
+        assertFalse(caps.supportsVector());
     }
 
     @Test
@@ -54,6 +56,7 @@ class DialectTest {
         assertTrue(caps.supportsNowait());
         assertFalse(caps.supportsFilterClause());
         assertFalse(caps.supportsDistinctOn());
+        assertFalse(caps.supportsVector());
     }
 
     @Test
@@ -72,6 +75,7 @@ class DialectTest {
         assertFalse(caps.supportsJsonb());
         assertFalse(caps.supportsFilterClause());
         assertFalse(caps.supportsDistinctOn());
+        assertFalse(caps.supportsVector());
     }
 
     // ==================== IDENTIFIER QUOTING ====================
