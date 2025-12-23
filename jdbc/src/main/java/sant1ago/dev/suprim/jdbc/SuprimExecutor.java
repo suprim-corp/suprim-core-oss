@@ -707,6 +707,57 @@ public final class SuprimExecutor {
         }
     }
 
+    // ============ Batch Entity Operations ============
+
+    /**
+     * Save multiple entities in efficient batch INSERT operations.
+     * IDs are generated and set on all entities.
+     *
+     * <p>For best performance, this method:
+     * <ul>
+     *   <li>Uses single multi-value INSERT statement (10-50x faster)</li>
+     *   <li>Generates application-side IDs for UUID_V4/UUID_V7 strategies</li>
+     *   <li>Uses RETURNING clause (PostgreSQL) or GENERATED_KEYS (MySQL) for DB-generated IDs</li>
+     *   <li>Automatically chunks large batches (default 500 entities per batch)</li>
+     * </ul>
+     *
+     * <pre>{@code
+     * List<User> users = List.of(user1, user2, user3);
+     * List<User> saved = executor.saveAll(users);
+     * // All entities now have IDs set
+     * }</pre>
+     *
+     * @param entities list of entities to save
+     * @param <T>      entity type
+     * @return the saved entities with IDs set
+     * @throws PersistenceException if batch save fails
+     */
+    public <T> List<T> saveAll(List<T> entities) {
+        if (Objects.isNull(entities) || entities.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        return executeAutoCommit((conn, dialect) ->
+            BatchPersistence.saveAll(entities, conn, dialect));
+    }
+
+    /**
+     * Save multiple entities with custom batch size.
+     *
+     * @param entities  list of entities to save
+     * @param batchSize maximum entities per batch (1-1000)
+     * @param <T>       entity type
+     * @return the saved entities with IDs set
+     */
+    public <T> List<T> saveAll(List<T> entities, int batchSize) {
+        if (Objects.isNull(entities) || entities.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        return executeAutoCommit((conn, dialect) ->
+            BatchPersistence.saveAll(entities, conn, dialect, batchSize));
+    }
+
     // ============ Auto-Commit Entity Operations ============
 
     /**

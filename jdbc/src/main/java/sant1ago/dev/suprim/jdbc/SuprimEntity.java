@@ -115,6 +115,53 @@ public abstract class SuprimEntity {
     }
 
     /**
+     * Save multiple entities in efficient batch INSERT operations.
+     * IDs are generated and set on all entities.
+     *
+     * <p>For best performance, this method:
+     * <ul>
+     *   <li>Uses single multi-value INSERT statement (10-50x faster)</li>
+     *   <li>Generates application-side IDs for UUID_V4/UUID_V7 strategies</li>
+     *   <li>Uses RETURNING clause (PostgreSQL) or GENERATED_KEYS (MySQL) for DB-generated IDs</li>
+     *   <li>Automatically chunks large batches (default 500 entities per batch)</li>
+     * </ul>
+     *
+     * <pre>{@code
+     * List<User> users = List.of(user1, user2, user3);
+     * List<User> saved = SuprimEntity.saveAll(users);
+     * // All entities now have IDs set
+     * }</pre>
+     *
+     * @param entities list of entities to save
+     * @param <T>      entity type
+     * @return the saved entities with IDs set
+     * @throws IllegalStateException if no transaction context and no global executor
+     * @throws PersistenceException  if batch save fails
+     */
+    public static <T extends SuprimEntity> List<T> saveAll(List<T> entities) {
+        if (Objects.isNull(entities) || entities.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        if (SuprimContext.hasContext()) {
+            Connection connection = SuprimContext.getConnection();
+            SqlDialect dialect = SuprimContext.getDialect();
+            return BatchPersistence.saveAll(entities, connection, dialect);
+        } else {
+            SuprimExecutor executor = SuprimContext.getGlobalExecutor();
+            if (Objects.isNull(executor)) {
+                throw new IllegalStateException(
+                    "No active transaction context and no global executor registered. " +
+                    "Either call saveAll() within executor.transaction(tx -> {...}) " +
+                    "or register a global executor with SuprimContext.setGlobalExecutor(executor)"
+                );
+            }
+            return executor.executeAutoCommit((conn, dialect) ->
+                BatchPersistence.saveAll(entities, conn, dialect));
+        }
+    }
+
+    /**
      * Update this entity in the database.
      *
      * <p>Entity must have an ID set. Updates all non-null columns.

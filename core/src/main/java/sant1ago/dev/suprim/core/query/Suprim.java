@@ -290,6 +290,26 @@ public final class Suprim {
         return new InsertBuilder<>(table);
     }
 
+    /**
+     * Start batch INSERT INTO query for multiple rows.
+     *
+     * <pre>{@code
+     * QueryResult query = Suprim.batchInsertInto(User_.TABLE)
+     *     .columns(User_.ID, User_.NAME, User_.EMAIL)
+     *     .values(Map.of("id", uuid1, "name", "John", "email", "john@ex.com"))
+     *     .values(Map.of("id", uuid2, "name", "Jane", "email", "jane@ex.com"))
+     *     .returning(User_.ID)
+     *     .build(dialect);
+     * }</pre>
+     *
+     * @param table the table to insert into
+     * @param <T>   entity type
+     * @return BatchInsertBuilder for chaining
+     */
+    public static <T> BatchInsertBuilder<T> batchInsertInto(Table<T> table) {
+        return new BatchInsertBuilder<>(table);
+    }
+
     // ==================== UPDATE ====================
 
     /**

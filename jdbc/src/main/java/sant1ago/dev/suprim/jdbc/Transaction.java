@@ -361,6 +361,58 @@ public final class Transaction {
         return EntityPersistence.save(entity, connection, dialect);
     }
 
+    /**
+     * Save multiple entities in efficient batch INSERT operations.
+     * IDs are generated and set on all entities.
+     *
+     * <pre>{@code
+     * executor.transaction(tx -> {
+     *     List<User> users = List.of(user1, user2, user3);
+     *     List<User> saved = tx.saveAll(users);
+     *     // All entities now have IDs set
+     * });
+     * }</pre>
+     *
+     * @param entities list of entities to save
+     * @param <T>      entity type
+     * @return the saved entities with IDs set
+     * @throws PersistenceException if batch save fails
+     */
+    public <T> List<T> saveAll(List<T> entities) {
+        return saveAll(entities, PostgreSqlDialect.INSTANCE);
+    }
+
+    /**
+     * Save multiple entities with specified dialect.
+     *
+     * @param entities list of entities to save
+     * @param dialect  the SQL dialect to use
+     * @param <T>      entity type
+     * @return the saved entities with IDs set
+     */
+    public <T> List<T> saveAll(List<T> entities, SqlDialect dialect) {
+        if (Objects.isNull(entities) || entities.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return BatchPersistence.saveAll(entities, connection, dialect);
+    }
+
+    /**
+     * Save multiple entities with custom batch size.
+     *
+     * @param entities  list of entities to save
+     * @param batchSize maximum entities per batch (1-1000)
+     * @param dialect   the SQL dialect to use
+     * @param <T>       entity type
+     * @return the saved entities with IDs set
+     */
+    public <T> List<T> saveAll(List<T> entities, int batchSize, SqlDialect dialect) {
+        if (Objects.isNull(entities) || entities.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return BatchPersistence.saveAll(entities, connection, dialect, batchSize);
+    }
+
     private void setParameters(PreparedStatement ps, Object[] parameters) throws SQLException {
         for (int i = 0; i < parameters.length; i++) {
             ps.setObject(i + 1, parameters[i]);
