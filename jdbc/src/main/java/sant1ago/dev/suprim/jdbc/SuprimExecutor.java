@@ -758,6 +758,84 @@ public final class SuprimExecutor {
             BatchPersistence.saveAll(entities, conn, dialect, batchSize));
     }
 
+    // ============ Upsert Operations ============
+
+    /**
+     * Upsert a single entity (INSERT ... ON CONFLICT DO UPDATE).
+     *
+     * <p>If a record with the same conflict columns exists, it will be updated.
+     * Otherwise, a new record is inserted.
+     *
+     * <pre>{@code
+     * User user = new User();
+     * user.setEmail("test@example.com");
+     * user.setName("Test");
+     *
+     * // Upsert with ID as conflict column
+     * User saved = executor.upsert(user, new String[]{"id"});
+     *
+     * // Upsert with email as conflict, update only name
+     * User saved = executor.upsert(user, new String[]{"email"}, new String[]{"name"});
+     * }</pre>
+     *
+     * @param entity          the entity to upsert
+     * @param conflictColumns columns that define the conflict (PK or unique constraint)
+     * @param <T>             entity type
+     * @return the upserted entity
+     */
+    public <T> T upsert(T entity, String[] conflictColumns) {
+        return upsert(entity, conflictColumns, null);
+    }
+
+    /**
+     * Upsert a single entity with specific columns to update.
+     *
+     * @param entity          the entity to upsert
+     * @param conflictColumns columns that define the conflict
+     * @param updateColumns   columns to update on conflict (null = all non-conflict)
+     * @param <T>             entity type
+     * @return the upserted entity
+     */
+    public <T> T upsert(T entity, String[] conflictColumns, String[] updateColumns) {
+        Objects.requireNonNull(entity, "Entity cannot be null");
+        return executeAutoCommit((conn, dialect) ->
+            UpsertPersistence.upsert(entity, conn, dialect, conflictColumns, updateColumns));
+    }
+
+    /**
+     * Upsert multiple entities in batch.
+     *
+     * <pre>{@code
+     * List<User> users = List.of(user1, user2, user3);
+     * List<User> saved = executor.upsertAll(users, new String[]{"email"});
+     * }</pre>
+     *
+     * @param entities        list of entities to upsert
+     * @param conflictColumns columns that define the conflict
+     * @param <T>             entity type
+     * @return the upserted entities
+     */
+    public <T> List<T> upsertAll(List<T> entities, String[] conflictColumns) {
+        return upsertAll(entities, conflictColumns, null);
+    }
+
+    /**
+     * Upsert multiple entities with specific columns to update.
+     *
+     * @param entities        list of entities to upsert
+     * @param conflictColumns columns that define the conflict
+     * @param updateColumns   columns to update on conflict (null = all non-conflict)
+     * @param <T>             entity type
+     * @return the upserted entities
+     */
+    public <T> List<T> upsertAll(List<T> entities, String[] conflictColumns, String[] updateColumns) {
+        if (Objects.isNull(entities) || entities.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return executeAutoCommit((conn, dialect) ->
+            UpsertPersistence.upsertAll(entities, conn, dialect, conflictColumns, updateColumns));
+    }
+
     // ============ Auto-Commit Entity Operations ============
 
     /**

@@ -162,6 +162,57 @@ public abstract class SuprimEntity {
     }
 
     /**
+     * Upsert this entity (INSERT ... ON CONFLICT DO UPDATE).
+     *
+     * <p>If a record with the same conflict columns exists, it will be updated.
+     * Otherwise, a new record is inserted.
+     *
+     * <pre>{@code
+     * User user = new User();
+     * user.setEmail("test@example.com");
+     * user.setName("Test");
+     * user.upsert("email");  // Upsert with email as conflict column
+     * }</pre>
+     *
+     * @param conflictColumns columns that define the conflict (PK or unique constraint)
+     * @return this entity
+     * @throws IllegalStateException if no transaction context and no global executor
+     * @throws PersistenceException  if upsert fails
+     */
+    public SuprimEntity upsert(String... conflictColumns) {
+        return upsert(conflictColumns, null);
+    }
+
+    /**
+     * Upsert this entity with specific columns to update on conflict.
+     *
+     * @param conflictColumns columns that define the conflict
+     * @param updateColumns   columns to update on conflict (null = all non-conflict)
+     * @return this entity
+     */
+    public SuprimEntity upsert(String[] conflictColumns, String[] updateColumns) {
+        if (SuprimContext.hasContext()) {
+            Connection connection = SuprimContext.getConnection();
+            SqlDialect dialect = SuprimContext.getDialect();
+            UpsertPersistence.upsert(this, connection, dialect, conflictColumns, updateColumns);
+        } else {
+            SuprimExecutor executor = SuprimContext.getGlobalExecutor();
+            if (Objects.isNull(executor)) {
+                throw new IllegalStateException(
+                    "No active transaction context and no global executor registered. " +
+                    "Either call upsert() within executor.transaction(tx -> {...}) " +
+                    "or register a global executor with SuprimContext.setGlobalExecutor(executor)"
+                );
+            }
+            executor.executeAutoCommit((conn, dialect) -> {
+                UpsertPersistence.upsert(this, conn, dialect, conflictColumns, updateColumns);
+                return null;
+            });
+        }
+        return this;
+    }
+
+    /**
      * Update this entity in the database.
      *
      * <p>Entity must have an ID set. Updates all non-null columns.
