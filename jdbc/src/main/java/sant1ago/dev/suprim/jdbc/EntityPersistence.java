@@ -284,6 +284,10 @@ final class EntityPersistence {
                             "Invalid UUID format for column '" + columnName + "': " + str, e);
                     }
                 }
+                // Convert to PGobject for SqlType.VECTOR columns (pgvector)
+                if (Objects.nonNull(column) && column.type() == SqlType.VECTOR) {
+                    value = EntityReflector.toVectorObject(value);
+                }
                 columns.put(columnName, value);
             }
         }
@@ -422,11 +426,17 @@ final class EntityPersistence {
 
     /**
      * Set parameters on prepared statement.
+     * Handles special types like enums by converting to their string representation.
      */
     private static void setParameters(PreparedStatement ps, Object[] values) throws SQLException {
         int i = 1;
         for (Object value : values) {
-            ps.setObject(i++, value);
+            if (value instanceof Enum<?> enumValue) {
+                // Convert Java enums to string for database compatibility
+                ps.setString(i++, enumValue.name());
+            } else {
+                ps.setObject(i++, value);
+            }
         }
     }
 
@@ -1035,5 +1045,76 @@ final class EntityPersistence {
                 e
             );
         }
+    }
+
+    /**
+     * Touch the entity's updated_at timestamp.
+     * Updates the updated_at column to the current time.
+     *
+     * @param entity     the entity to touch
+     * @param connection the database connection
+     * @param dialect    the SQL dialect
+     */
+    static void touch(Object entity, Connection connection, SqlDialect dialect) {
+        Objects.requireNonNull(entity, "Entity cannot be null");
+        Objects.requireNonNull(connection, "Connection cannot be null");
+
+        Class<?> entityClass = entity.getClass();
+        EntityReflector.IdMeta idMeta = EntityReflector.getIdMeta(entityClass);
+        EntityReflector.EntityMeta entityMeta = EntityReflector.getEntityMeta(entityClass);
+
+        Object id = EntityReflector.getIdOrNull(entity);
+        if (Objects.isNull(id)) {
+            throw new PersistenceException(
+                "Cannot touch entity without ID.",
+                entityClass
+            );
+        }
+
+        // Find the updated_at column
+        String updatedAtColumn = findUpdatedAtColumn(entityClass);
+        if (Objects.isNull(updatedAtColumn)) {
+            throw new PersistenceException(
+                "Cannot touch entity without @UpdateTimestamp annotation.",
+                entityClass
+            );
+        }
+
+        String tableName = Objects.nonNull(entityMeta.schema())
+            ? dialect.quoteIdentifier(entityMeta.schema()) + "." + dialect.quoteIdentifier(entityMeta.tableName())
+            : dialect.quoteIdentifier(entityMeta.tableName());
+
+        String sql = "UPDATE " + tableName +
+            " SET " + dialect.quoteIdentifier(updatedAtColumn) + " = " + dialect.currentTimestampFunction() +
+            " WHERE " + dialect.quoteIdentifier(idMeta.columnName()) + " = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setObject(1, convertIdForQuery(id, idMeta));
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException(
+                "Failed to touch entity: " + e.getMessage(),
+                entityClass,
+                e
+            );
+        }
+    }
+
+    /**
+     * Find the updated_at column name from @UpdateTimestamp annotation.
+     */
+    private static String findUpdatedAtColumn(Class<?> entityClass) {
+        Class<?> current = entityClass;
+        while (current != Object.class) {
+            for (Field field : current.getDeclaredFields()) {
+                sant1ago.dev.suprim.annotation.entity.UpdateTimestamp updateAnn =
+                    field.getAnnotation(sant1ago.dev.suprim.annotation.entity.UpdateTimestamp.class);
+                if (Objects.nonNull(updateAnn)) {
+                    return updateAnn.column();
+                }
+            }
+            current = current.getSuperclass();
+        }
+        return null;
     }
 }

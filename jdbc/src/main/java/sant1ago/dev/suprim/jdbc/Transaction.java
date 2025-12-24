@@ -361,6 +361,123 @@ public final class Transaction {
         return EntityPersistence.save(entity, connection, dialect);
     }
 
+    /**
+     * Save multiple entities in efficient batch INSERT operations.
+     * IDs are generated and set on all entities.
+     *
+     * <pre>{@code
+     * executor.transaction(tx -> {
+     *     List<User> users = List.of(user1, user2, user3);
+     *     List<User> saved = tx.saveAll(users);
+     *     // All entities now have IDs set
+     * });
+     * }</pre>
+     *
+     * @param entities list of entities to save
+     * @param <T>      entity type
+     * @return the saved entities with IDs set
+     * @throws PersistenceException if batch save fails
+     */
+    public <T> List<T> saveAll(List<T> entities) {
+        return saveAll(entities, PostgreSqlDialect.INSTANCE);
+    }
+
+    /**
+     * Save multiple entities with specified dialect.
+     *
+     * @param entities list of entities to save
+     * @param dialect  the SQL dialect to use
+     * @param <T>      entity type
+     * @return the saved entities with IDs set
+     */
+    public <T> List<T> saveAll(List<T> entities, SqlDialect dialect) {
+        if (Objects.isNull(entities) || entities.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return BatchPersistence.saveAll(entities, connection, dialect);
+    }
+
+    /**
+     * Save multiple entities with custom batch size.
+     *
+     * @param entities  list of entities to save
+     * @param batchSize maximum entities per batch (1-1000)
+     * @param dialect   the SQL dialect to use
+     * @param <T>       entity type
+     * @return the saved entities with IDs set
+     */
+    public <T> List<T> saveAll(List<T> entities, int batchSize, SqlDialect dialect) {
+        if (Objects.isNull(entities) || entities.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return BatchPersistence.saveAll(entities, connection, dialect, batchSize);
+    }
+
+    // ==================== UPSERT ====================
+
+    /**
+     * Upsert a single entity (INSERT ... ON CONFLICT DO UPDATE).
+     *
+     * <pre>{@code
+     * executor.transaction(tx -> {
+     *     User user = new User();
+     *     user.setEmail("test@example.com");
+     *     User saved = tx.upsert(user, new String[]{"email"});
+     * });
+     * }</pre>
+     *
+     * @param entity          the entity to upsert
+     * @param conflictColumns columns that define the conflict
+     * @param <T>             entity type
+     * @return the upserted entity
+     */
+    public <T> T upsert(T entity, String[] conflictColumns) {
+        return upsert(entity, conflictColumns, null, PostgreSqlDialect.INSTANCE);
+    }
+
+    /**
+     * Upsert a single entity with specific columns to update.
+     *
+     * @param entity          the entity to upsert
+     * @param conflictColumns columns that define the conflict
+     * @param updateColumns   columns to update on conflict (null = all non-conflict)
+     * @param dialect         the SQL dialect
+     * @param <T>             entity type
+     * @return the upserted entity
+     */
+    public <T> T upsert(T entity, String[] conflictColumns, String[] updateColumns, SqlDialect dialect) {
+        return UpsertPersistence.upsert(entity, connection, dialect, conflictColumns, updateColumns);
+    }
+
+    /**
+     * Upsert multiple entities in batch.
+     *
+     * @param entities        list of entities to upsert
+     * @param conflictColumns columns that define the conflict
+     * @param <T>             entity type
+     * @return the upserted entities
+     */
+    public <T> List<T> upsertAll(List<T> entities, String[] conflictColumns) {
+        return upsertAll(entities, conflictColumns, null, PostgreSqlDialect.INSTANCE);
+    }
+
+    /**
+     * Upsert multiple entities with specific columns to update.
+     *
+     * @param entities        list of entities to upsert
+     * @param conflictColumns columns that define the conflict
+     * @param updateColumns   columns to update on conflict (null = all non-conflict)
+     * @param dialect         the SQL dialect
+     * @param <T>             entity type
+     * @return the upserted entities
+     */
+    public <T> List<T> upsertAll(List<T> entities, String[] conflictColumns, String[] updateColumns, SqlDialect dialect) {
+        if (Objects.isNull(entities) || entities.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return UpsertPersistence.upsertAll(entities, connection, dialect, conflictColumns, updateColumns);
+    }
+
     private void setParameters(PreparedStatement ps, Object[] parameters) throws SQLException {
         for (int i = 0; i < parameters.length; i++) {
             ps.setObject(i + 1, parameters[i]);

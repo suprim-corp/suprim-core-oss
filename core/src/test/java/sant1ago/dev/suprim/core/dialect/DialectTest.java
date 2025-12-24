@@ -24,6 +24,7 @@ class DialectTest {
         assertTrue(caps.supportsNowait());
         assertTrue(caps.supportsFilterClause());
         assertTrue(caps.supportsDistinctOn());
+        assertTrue(caps.supportsVector());
     }
 
     @Test
@@ -39,6 +40,7 @@ class DialectTest {
         assertFalse(caps.supportsNowait());
         assertFalse(caps.supportsFilterClause());
         assertFalse(caps.supportsDistinctOn());
+        assertFalse(caps.supportsVector());
     }
 
     @Test
@@ -54,6 +56,7 @@ class DialectTest {
         assertTrue(caps.supportsNowait());
         assertFalse(caps.supportsFilterClause());
         assertFalse(caps.supportsDistinctOn());
+        assertFalse(caps.supportsVector());
     }
 
     @Test
@@ -72,6 +75,7 @@ class DialectTest {
         assertFalse(caps.supportsJsonb());
         assertFalse(caps.supportsFilterClause());
         assertFalse(caps.supportsDistinctOn());
+        assertFalse(caps.supportsVector());
     }
 
     // ==================== IDENTIFIER QUOTING ====================
@@ -376,5 +380,20 @@ class DialectTest {
                 () -> dialect.distinctOn("user_id")
         );
         assertEquals("DISTINCT ON", ex.getFeature());
+    }
+
+    // ==================== CURRENT TIMESTAMP FUNCTION ====================
+
+    @Test
+    void testCurrentTimestampFunctionDefault() {
+        // Default implementation returns NOW()
+        SqlDialect dialect = PostgreSqlDialect.INSTANCE;
+        assertEquals("NOW()", dialect.currentTimestampFunction());
+    }
+
+    @Test
+    void testCurrentTimestampFunctionMySql() {
+        SqlDialect dialect = MySqlDialect.INSTANCE;
+        assertEquals("NOW()", dialect.currentTimestampFunction());
     }
 }

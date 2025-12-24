@@ -62,6 +62,13 @@ public interface DialectCapabilities {
      */
     boolean supportsDistinctOn();
 
+    /**
+     * Supports VECTOR type (pgvector extension).
+     *
+     * @return true if VECTOR is supported
+     */
+    boolean supportsVector();
+
     // ==================== PRE-BUILT INSTANCES ====================
 
     /** Full capabilities - PostgreSQL (primary dialect). */
@@ -74,6 +81,7 @@ public interface DialectCapabilities {
         @Override public boolean supportsNowait() { return true; }
         @Override public boolean supportsFilterClause() { return true; }
         @Override public boolean supportsDistinctOn() { return true; }
+        @Override public boolean supportsVector() { return true; }
     };
 
     /** MySQL 5.7 capabilities. */
@@ -86,6 +94,7 @@ public interface DialectCapabilities {
         @Override public boolean supportsNowait() { return false; }
         @Override public boolean supportsFilterClause() { return false; }
         @Override public boolean supportsDistinctOn() { return false; }
+        @Override public boolean supportsVector() { return false; }
     };
 
     /** MySQL 8.0+ capabilities - adds SKIP LOCKED and NOWAIT support. */
@@ -98,6 +107,7 @@ public interface DialectCapabilities {
         @Override public boolean supportsNowait() { return true; }
         @Override public boolean supportsFilterClause() { return false; }
         @Override public boolean supportsDistinctOn() { return false; }
+        @Override public boolean supportsVector() { return false; }
     };
 
     /** MariaDB 10.5+ capabilities - similar to MySQL 8 with RETURNING support. */
@@ -110,5 +120,6 @@ public interface DialectCapabilities {
         @Override public boolean supportsNowait() { return true; }      // MariaDB 10.3+
         @Override public boolean supportsFilterClause() { return false; }
         @Override public boolean supportsDistinctOn() { return false; }
+        @Override public boolean supportsVector() { return false; }
     };
 }

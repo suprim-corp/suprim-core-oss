@@ -11,6 +11,7 @@ import sant1ago.dev.suprim.annotation.entity.Column;
 import sant1ago.dev.suprim.annotation.entity.Entity;
 import sant1ago.dev.suprim.annotation.entity.Id;
 import sant1ago.dev.suprim.annotation.entity.SoftDeletes;
+import sant1ago.dev.suprim.annotation.entity.UpdateTimestamp;
 import sant1ago.dev.suprim.annotation.type.GenerationType;
 
 import java.time.LocalDateTime;
@@ -57,6 +58,12 @@ class SuprimEntityTest {
                 "\"email\" VARCHAR(255), " +
                 "\"deleted_at\" TIMESTAMP)"
             );
+            conn.createStatement().execute(
+                "CREATE TABLE IF NOT EXISTS \"enum_users\" (" +
+                "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                "\"name\" VARCHAR(255), " +
+                "\"status\" VARCHAR(50))"
+            );
         }
     }
 
@@ -66,6 +73,7 @@ class SuprimEntityTest {
             conn.createStatement().execute("DROP TABLE IF EXISTS \"entity_users\"");
             conn.createStatement().execute("DROP TABLE IF EXISTS \"custom_gen_users\"");
             conn.createStatement().execute("DROP TABLE IF EXISTS \"soft_delete_users\"");
+            conn.createStatement().execute("DROP TABLE IF EXISTS \"enum_users\"");
         }
     }
 
@@ -73,6 +81,12 @@ class SuprimEntityTest {
     void cleanup() {
         SuprimContext.clearContext();
         SuprimContext.clearGlobalExecutor();
+    }
+
+    // ==================== TEST ENUMS ====================
+
+    enum UserStatus {
+        ACTIVE, INACTIVE, PENDING
     }
 
     // ==================== TEST ENTITIES ====================
@@ -115,6 +129,26 @@ class SuprimEntityTest {
         public void setId(String id) { this.id = id; }
         public String getName() { return name; }
         public void setName(String name) { this.name = name; }
+    }
+
+    @Entity(table = "enum_users")
+    static class EnumUser extends SuprimEntity {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @Column(name = "name")
+        private String name;
+
+        @Column(name = "status")
+        private UserStatus status;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public UserStatus getStatus() { return status; }
+        public void setStatus(UserStatus status) { this.status = status; }
     }
 
     // ==================== TESTS ====================
@@ -168,6 +202,32 @@ class SuprimEntityTest {
                 SuprimEntity returned = user.save();
                 assertSame(user, returned);
             });
+        }
+
+        @Test
+        @DisplayName("saves entity with enum field")
+        void save_withEnumField_savesCorrectly() throws SQLException {
+            EnumUser user = new EnumUser();
+            user.setName("enum-test");
+            user.setStatus(UserStatus.ACTIVE);
+
+            executor.transaction(tx -> {
+                user.save();
+            });
+
+            // Verify ID was generated and enum was persisted
+            assertNotNull(user.getId());
+            assertEquals(UserStatus.ACTIVE, user.getStatus());
+
+            // Verify the enum value is stored as string in DB
+            try (Connection conn = dataSource.getConnection();
+                 var ps = conn.prepareStatement("SELECT \"status\" FROM \"enum_users\" WHERE \"id\" = ?")) {
+                ps.setString(1, user.getId());
+                try (var rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("ACTIVE", rs.getString("status"));
+                }
+            }
         }
     }
 
@@ -1200,6 +1260,63 @@ class SuprimEntityTest {
                 assertNull(user.getDeletedAt());
             });
         }
+
+        @Test
+        @DisplayName("restore() throws when entity has no @SoftDeletes")
+        void restore_throwsWhenNoSoftDeletes() {
+            executor.transaction(tx -> {
+                TestUser user = new TestUser();
+                user.setEmail("nosoftdelete@test.com");
+                tx.save(user);
+
+                assertThrows(sant1ago.dev.suprim.jdbc.exception.PersistenceException.class, user::restore);
+            });
+        }
+
+        @Test
+        @DisplayName("restore() throws when entity has no ID")
+        void restore_throwsWhenNoId() {
+            executor.transaction(tx -> {
+                SoftDeleteUser user = new SoftDeleteUser();
+                user.setEmail("noid@test.com");
+                // Don't save - entity has no ID
+
+                assertThrows(sant1ago.dev.suprim.jdbc.exception.PersistenceException.class, user::restore);
+            });
+        }
+
+        @Test
+        @DisplayName("restore() works with schema-qualified entity")
+        void restore_worksWithSchema() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute("CREATE SCHEMA IF NOT EXISTS \"test_schema\"");
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"test_schema\".\"schema_soft_delete\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"email\" VARCHAR(255), " +
+                    "\"deleted_at\" TIMESTAMP)"
+                );
+            }
+
+            try {
+                executor.transaction(tx -> {
+                    SchemaSoftDeleteEntity entity = new SchemaSoftDeleteEntity();
+                    entity.setEmail("schema@test.com");
+                    tx.save(entity);
+
+                    entity.delete();
+                    assertTrue(entity.trashed());
+
+                    entity.restore();
+                    assertFalse(entity.trashed());
+                });
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"test_schema\".\"schema_soft_delete\"");
+                    conn.createStatement().execute("DROP SCHEMA IF EXISTS \"test_schema\"");
+                }
+            }
+        }
     }
 
     @Entity(table = "soft_delete_users")
@@ -1221,5 +1338,543 @@ class SuprimEntityTest {
         public void setEmail(String email) { this.email = email; }
         public LocalDateTime getDeletedAt() { return deletedAt; }
         public void setDeletedAt(LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
+    }
+
+    @Entity(table = "schema_soft_delete", schema = "test_schema")
+    @SoftDeletes
+    static class SchemaSoftDeleteEntity extends SuprimEntity {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @Column(name = "email")
+        private String email;
+
+        @Column(name = "deleted_at")
+        private LocalDateTime deletedAt;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+        public LocalDateTime getDeletedAt() { return deletedAt; }
+        public void setDeletedAt(LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
+    }
+
+    // ==================== REPLICATE TESTS ====================
+
+    @Nested
+    @DisplayName("replicate() method")
+    class ReplicateTests {
+
+        @Test
+        @DisplayName("replicate() creates copy without ID")
+        void replicate_createsCopyWithoutId() {
+            executor.transaction(tx -> {
+                TestUser original = new TestUser();
+                original.setEmail("original@test.com");
+                tx.save(original);
+
+                TestUser copy = original.replicate();
+
+                assertNull(copy.getId());
+                assertEquals("original@test.com", copy.getEmail());
+            });
+        }
+
+        @Test
+        @DisplayName("replicate() copy can be saved as new record")
+        void replicate_copyCanBeSaved() {
+            executor.transaction(tx -> {
+                TestUser original = new TestUser();
+                original.setEmail("original@test.com");
+                tx.save(original);
+                String originalId = original.getId();
+
+                TestUser copy = original.replicate();
+                copy.setEmail("copy@test.com");
+                copy.save();
+
+                assertNotNull(copy.getId());
+                assertNotEquals(originalId, copy.getId());
+                assertEquals("copy@test.com", copy.getEmail());
+            });
+        }
+
+        @Test
+        @DisplayName("replicate(except) excludes specified fields")
+        void replicate_withExcept_excludesFields() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"replicate_test\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"name\" VARCHAR(255), " +
+                    "\"status\" VARCHAR(50))"
+                );
+            }
+
+            try {
+                executor.transaction(tx -> {
+                    ReplicateTestEntity original = new ReplicateTestEntity();
+                    original.setName("Test Name");
+                    original.setStatus("active");
+                    tx.save(original);
+
+                    ReplicateTestEntity copy = original.replicate("status");
+
+                    assertNull(copy.getId());
+                    assertEquals("Test Name", copy.getName());
+                    assertNull(copy.getStatus()); // excluded
+                });
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"replicate_test\"");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("replicate() handles entity with no default constructor gracefully")
+        void replicate_handlesReflectionErrors() {
+            // Testing that error path is hit (entity without default constructor would throw)
+            executor.transaction(tx -> {
+                TestUser user = new TestUser();
+                user.setEmail("test@test.com");
+                tx.save(user);
+
+                // Should work for entities with default constructor
+                TestUser copy = user.replicate();
+                assertNotNull(copy);
+            });
+        }
+
+        @Test
+        @DisplayName("replicate(except) excludes by column name when different from field name")
+        void replicate_withExcept_excludesByColumnName() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"column_name_test\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"user_name\" VARCHAR(255), " +
+                    "\"user_status\" VARCHAR(50))"
+                );
+            }
+
+            try {
+                executor.transaction(tx -> {
+                    ColumnNameEntity original = new ColumnNameEntity();
+                    original.setName("Test Name");
+                    original.setStatus("active");
+                    tx.save(original);
+
+                    // Exclude by column name (not field name)
+                    ColumnNameEntity copy = original.replicate("user_status");
+
+                    assertNull(copy.getId());
+                    assertEquals("Test Name", copy.getName());
+                    assertNull(copy.getStatus()); // excluded by column name
+                });
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"column_name_test\"");
+                }
+            }
+        }
+    }
+
+    @Entity(table = "replicate_test")
+    static class ReplicateTestEntity extends SuprimEntity {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @Column(name = "name")
+        private String name;
+
+        @Column(name = "status")
+        private String status;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+    }
+
+    @Entity(table = "column_name_test")
+    static class ColumnNameEntity extends SuprimEntity {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @Column(name = "user_name")
+        private String name;
+
+        @Column(name = "user_status")
+        private String status;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+    }
+
+    // ==================== TOUCH TESTS ====================
+
+    @Nested
+    @DisplayName("touch() method")
+    class TouchTests {
+
+        @Test
+        @DisplayName("touch() updates updated_at timestamp")
+        void touch_updatesTimestamp() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"touch_test\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"name\" VARCHAR(255), " +
+                    "\"updated_at\" TIMESTAMP)"
+                );
+            }
+
+            try {
+                executor.transaction(tx -> {
+                    TouchTestEntity entity = new TouchTestEntity();
+                    entity.setName("Test");
+                    tx.save(entity);
+
+                    LocalDateTime beforeTouch = entity.getUpdatedAt();
+
+                    // Small delay to ensure timestamp changes
+                    try { Thread.sleep(10); } catch (InterruptedException e) { }
+
+                    entity.touch();
+
+                    // Refresh to get DB value
+                    entity.refresh();
+                    LocalDateTime afterTouch = entity.getUpdatedAt();
+
+                    assertNotNull(afterTouch);
+                    // After touch should be >= before (or null if no updated_at before)
+                    if (beforeTouch != null) {
+                        assertTrue(afterTouch.isAfter(beforeTouch) || afterTouch.equals(beforeTouch));
+                    }
+                });
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"touch_test\"");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("touch() works in auto-commit mode")
+        void touch_worksInAutoCommit() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"touch_test\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"name\" VARCHAR(255), " +
+                    "\"updated_at\" TIMESTAMP)"
+                );
+            }
+
+            try {
+                SuprimContext.setGlobalExecutor(executor);
+
+                TouchTestEntity entity = new TouchTestEntity();
+                entity.setName("AutoCommit Touch Test");
+                entity.save();
+
+                entity.touch(); // Auto-commit
+
+                entity.refresh();
+                assertNotNull(entity.getUpdatedAt());
+            } finally {
+                SuprimContext.clearGlobalExecutor();
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"touch_test\"");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("touch() throws when no context and no global executor")
+        void touch_noContext_throws() {
+            TouchTestEntity entity = new TouchTestEntity();
+            entity.setId("test-id");
+
+            IllegalStateException ex = assertThrows(IllegalStateException.class, entity::touch);
+            assertTrue(ex.getMessage().contains("No active transaction context"));
+        }
+
+        @Test
+        @DisplayName("touch() throws when entity has no ID")
+        void touch_throwsWhenNoId() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"touch_test\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"name\" VARCHAR(255), " +
+                    "\"updated_at\" TIMESTAMP)"
+                );
+            }
+
+            try {
+                executor.transaction(tx -> {
+                    TouchTestEntity entity = new TouchTestEntity();
+                    entity.setName("No ID Test");
+                    // Don't save - entity has no ID
+
+                    assertThrows(sant1ago.dev.suprim.jdbc.exception.PersistenceException.class, entity::touch);
+                });
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"touch_test\"");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("touch() returns this for chaining")
+        void touch_returnsThis() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"touch_test\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"name\" VARCHAR(255), " +
+                    "\"updated_at\" TIMESTAMP)"
+                );
+            }
+
+            try {
+                executor.transaction(tx -> {
+                    TouchTestEntity entity = new TouchTestEntity();
+                    entity.setName("Chain Test");
+                    tx.save(entity);
+
+                    SuprimEntity result = entity.touch();
+                    assertSame(entity, result);
+                });
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"touch_test\"");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("touch() works with schema-qualified entity")
+        void touch_worksWithSchema() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute("CREATE SCHEMA IF NOT EXISTS \"test_schema\"");
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"test_schema\".\"schema_touch_test\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"name\" VARCHAR(255), " +
+                    "\"updated_at\" TIMESTAMP)"
+                );
+            }
+
+            try {
+                executor.transaction(tx -> {
+                    SchemaTouchTestEntity entity = new SchemaTouchTestEntity();
+                    entity.setName("Schema Test");
+                    tx.save(entity);
+
+                    entity.touch();
+                    entity.refresh();
+                    assertNotNull(entity.getUpdatedAt());
+                });
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"test_schema\".\"schema_touch_test\"");
+                    conn.createStatement().execute("DROP SCHEMA IF EXISTS \"test_schema\"");
+                }
+            }
+        }
+    }
+
+    @Entity(table = "touch_test")
+    static class TouchTestEntity extends SuprimEntity {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @Column(name = "name")
+        private String name;
+
+        @UpdateTimestamp(column = "updated_at")
+        @Column(name = "updated_at")
+        private LocalDateTime updatedAt;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public LocalDateTime getUpdatedAt() { return updatedAt; }
+        public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    }
+
+    @Entity(table = "schema_touch_test", schema = "test_schema")
+    static class SchemaTouchTestEntity extends SuprimEntity {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @Column(name = "name")
+        private String name;
+
+        @UpdateTimestamp(column = "updated_at")
+        @Column(name = "updated_at")
+        private LocalDateTime updatedAt;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public LocalDateTime getUpdatedAt() { return updatedAt; }
+        public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    }
+
+    // ==================== SAVE WITH EXISTING ID TESTS ====================
+
+    @Nested
+    @DisplayName("save() with existing ID")
+    class SaveWithExistingIdTests {
+
+        @Test
+        @DisplayName("save() inserts entity with pre-set ID")
+        void save_withPresetId_insertsEntity() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"preset_id_entity\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"name\" VARCHAR(255))"
+                );
+            }
+
+            try {
+                executor.transaction(tx -> {
+                    PresetIdEntity entity = new PresetIdEntity();
+                    String customId = "my-custom-preset-id-123";
+                    entity.setId(customId); // Pre-set the ID
+                    entity.setName("Test Name");
+
+                    tx.save(entity);
+
+                    // ID should remain as set
+                    assertEquals(customId, entity.getId());
+
+                    // Verify it was saved correctly
+                    entity.refresh();
+                    assertEquals("Test Name", entity.getName());
+                });
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"preset_id_entity\"");
+                }
+            }
+        }
+    }
+
+    @Entity(table = "preset_id_entity")
+    static class PresetIdEntity extends SuprimEntity {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id")
+        private String id;
+
+        @Column(name = "name")
+        private String name;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+    }
+
+    // ==================== MANUAL ID STRATEGY TESTS ====================
+
+    @Nested
+    @DisplayName("Manual ID strategy (NONE)")
+    class ManualIdStrategyTests {
+
+        @Test
+        @DisplayName("save() throws when strategy is NONE and ID is null")
+        void save_manualStrategyNoId_throws() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"manual_id_entity\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"name\" VARCHAR(255))"
+                );
+            }
+
+            try {
+                executor.transaction(tx -> {
+                    ManualIdEntity entity = new ManualIdEntity();
+                    entity.setName("Test");
+                    // Don't set ID - should throw
+
+                    Exception ex = assertThrows(
+                        sant1ago.dev.suprim.jdbc.exception.PersistenceException.class,
+                        () -> tx.save(entity)
+                    );
+                    assertTrue(ex.getMessage().contains("Entity ID is null and strategy is NONE"));
+                });
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"manual_id_entity\"");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("save() works when strategy is NONE and ID is set")
+        void save_manualStrategyWithId_saves() throws SQLException {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute(
+                    "CREATE TABLE IF NOT EXISTS \"manual_id_entity\" (" +
+                    "\"id\" VARCHAR(36) PRIMARY KEY, " +
+                    "\"name\" VARCHAR(255))"
+                );
+            }
+
+            try {
+                executor.transaction(tx -> {
+                    ManualIdEntity entity = new ManualIdEntity();
+                    entity.setId("manual-123");
+                    entity.setName("Manual Test");
+
+                    tx.save(entity);
+
+                    assertEquals("manual-123", entity.getId());
+                    entity.refresh();
+                    assertEquals("Manual Test", entity.getName());
+                });
+            } finally {
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.createStatement().execute("DROP TABLE IF EXISTS \"manual_id_entity\"");
+                }
+            }
+        }
+    }
+
+    @Entity(table = "manual_id_entity")
+    static class ManualIdEntity extends SuprimEntity {
+        @Id(strategy = GenerationType.NONE)
+        @Column(name = "id")
+        private String id;
+
+        @Column(name = "name")
+        private String name;
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
     }
 }

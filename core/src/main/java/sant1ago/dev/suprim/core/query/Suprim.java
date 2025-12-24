@@ -290,6 +290,62 @@ public final class Suprim {
         return new InsertBuilder<>(table);
     }
 
+    /**
+     * Start batch INSERT INTO query for multiple rows.
+     *
+     * <pre>{@code
+     * QueryResult query = Suprim.batchInsertInto(User_.TABLE)
+     *     .columns(User_.ID, User_.NAME, User_.EMAIL)
+     *     .values(Map.of("id", uuid1, "name", "John", "email", "john@ex.com"))
+     *     .values(Map.of("id", uuid2, "name", "Jane", "email", "jane@ex.com"))
+     *     .returning(User_.ID)
+     *     .build(dialect);
+     * }</pre>
+     *
+     * @param table the table to insert into
+     * @param <T>   entity type
+     * @return BatchInsertBuilder for chaining
+     */
+    public static <T> BatchInsertBuilder<T> batchInsertInto(Table<T> table) {
+        return new BatchInsertBuilder<>(table);
+    }
+
+    // ==================== UPSERT ====================
+
+    /**
+     * Start UPSERT (INSERT ... ON CONFLICT) query.
+     *
+     * <p>Generates dialect-specific SQL:
+     * <ul>
+     *   <li>PostgreSQL: {@code INSERT ... ON CONFLICT (id) DO UPDATE SET ...}</li>
+     *   <li>MySQL: {@code INSERT ... ON DUPLICATE KEY UPDATE ...}</li>
+     * </ul>
+     *
+     * <pre>{@code
+     * QueryResult query = Suprim.upsertInto(User_.TABLE)
+     *     .columns(User_.ID, User_.EMAIL, User_.NAME)
+     *     .values(Map.of("id", uuid, "email", "test@ex.com", "name", "Test"))
+     *     .onConflict(User_.ID)
+     *     .doUpdate(User_.EMAIL, User_.NAME)
+     *     .build(dialect);
+     *
+     * // Or ignore duplicates:
+     * QueryResult query = Suprim.upsertInto(User_.TABLE)
+     *     .columns(User_.EMAIL)
+     *     .values(Map.of("email", "test@ex.com"))
+     *     .onConflict(User_.EMAIL)
+     *     .doNothing()
+     *     .build(dialect);
+     * }</pre>
+     *
+     * @param table the table to upsert into
+     * @param <T>   entity type
+     * @return UpsertBuilder for chaining
+     */
+    public static <T> UpsertBuilder<T> upsertInto(Table<T> table) {
+        return new UpsertBuilder<>(table);
+    }
+
     // ==================== UPDATE ====================
 
     /**
