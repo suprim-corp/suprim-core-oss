@@ -682,7 +682,12 @@ public final class SuprimExecutor {
 
     private void setParameters(PreparedStatement ps, Object[] parameters) throws SQLException {
         for (int i = 0; i < parameters.length; i++) {
-            ps.setObject(i + 1, parameters[i]);
+            Object param = parameters[i];
+            if (param instanceof Enum<?> enumValue) {
+                ps.setString(i + 1, enumValue.name());
+            } else {
+                ps.setObject(i + 1, param);
+            }
         }
     }
 
