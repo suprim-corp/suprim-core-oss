@@ -11,10 +11,12 @@ import sant1ago.dev.suprim.annotation.entity.CreationTimestamp;
 import sant1ago.dev.suprim.annotation.entity.Entity;
 import sant1ago.dev.suprim.annotation.entity.Id;
 import sant1ago.dev.suprim.annotation.entity.UpdateTimestamp;
+import sant1ago.dev.suprim.annotation.type.GenerationType;
 import sant1ago.dev.suprim.annotation.type.SqlType;
 import sant1ago.dev.suprim.jdbc.exception.NoResultException;
 
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -2139,6 +2141,729 @@ class FinderTest {
         }
     }
 
+    // ==================== LIKE PATTERN MATCHING TESTS ====================
+
+    @Nested
+    @DisplayName("LIKE Pattern Matching")
+    class LikePatternMatchingTests {
+
+        @BeforeEach
+        void setupLikeData() {
+            insertUser("john.doe@gmail.com", "John Doe", "active", 30);
+            insertUser("jane.smith@yahoo.com", "Jane Smith", "active", 25);
+            insertUser("admin@company.com", "Admin User", "inactive", 40);
+            insertUser("dev.team@company.com", "Dev Team", "active", 28);
+        }
+
+        @Test
+        @DisplayName("whereLike() filters with LIKE pattern")
+        void whereLike_filtersWithPattern() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .whereLike("name", "%Doe%")
+                .get();
+            assertEquals(1, results.size());
+            assertEquals("John Doe", results.get(0).getName());
+        }
+
+        @Test
+        @DisplayName("whereNotLike() excludes matching pattern")
+        void whereNotLike_excludesPattern() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .whereNotLike("name", "%Admin%")
+                .get();
+            assertEquals(3, results.size());
+        }
+
+        @Test
+        @DisplayName("orWhereLike() adds OR LIKE condition")
+        void orWhereLike_addsOrCondition() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .whereLike("name", "%John%")
+                .orWhereLike("name", "%Jane%")
+                .get();
+            assertEquals(2, results.size());
+        }
+
+        @Test
+        @DisplayName("orWhereNotLike() adds OR NOT LIKE condition")
+        void orWhereNotLike_addsOrCondition() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .where("status", "inactive")
+                .orWhereNotLike("name", "%Admin%")
+                .get();
+            assertEquals(4, results.size());
+        }
+
+        @Test
+        @DisplayName("whereContains() wraps value with wildcards")
+        void whereContains_wrapsWithWildcards() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .whereContains("name", "Doe")
+                .get();
+            assertEquals(1, results.size());
+            assertEquals("John Doe", results.get(0).getName());
+        }
+
+        @Test
+        @DisplayName("whereStartsWith() matches prefix")
+        void whereStartsWith_matchesPrefix() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .whereStartsWith("name", "John")
+                .get();
+            assertEquals(1, results.size());
+        }
+
+        @Test
+        @DisplayName("whereEndsWith() matches suffix")
+        void whereEndsWith_matchesSuffix() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .whereEndsWith("email", "@gmail.com")
+                .get();
+            assertEquals(1, results.size());
+            assertEquals("john.doe@gmail.com", results.get(0).getEmail());
+        }
+
+        @Test
+        @DisplayName("orWhereContains() adds OR with wildcards")
+        void orWhereContains_addsOrWithWildcards() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .whereContains("name", "John")
+                .orWhereContains("name", "Jane")
+                .get();
+            assertEquals(2, results.size());
+        }
+
+        @Test
+        @DisplayName("orWhereStartsWith() adds OR prefix match")
+        void orWhereStartsWith_addsOrPrefix() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .whereStartsWith("name", "John")
+                .orWhereStartsWith("name", "Admin")
+                .get();
+            assertEquals(2, results.size());
+        }
+
+        @Test
+        @DisplayName("orWhereEndsWith() adds OR suffix match")
+        void orWhereEndsWith_addsOrSuffix() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .whereEndsWith("email", "@gmail.com")
+                .orWhereEndsWith("email", "@yahoo.com")
+                .get();
+            assertEquals(2, results.size());
+        }
+
+        @Test
+        @DisplayName("LIKE methods can be chained")
+        void like_methodsCanBeChained() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class);
+            assertSame(finder, finder.whereLike("name", "%test%"));
+            assertSame(finder, finder.whereNotLike("name", "%admin%"));
+            assertSame(finder, finder.orWhereLike("name", "%user%"));
+        }
+    }
+
+    // ==================== HAVING CLAUSE TESTS ====================
+
+    @Nested
+    @DisplayName("HAVING Clause")
+    class HavingClauseTests {
+
+        @BeforeEach
+        void setupHavingData() {
+            // Create data for aggregation tests
+            insertUser("user1@test.com", "User One", "active", 25);
+            insertUser("user2@test.com", "User Two", "active", 30);
+            insertUser("user3@test.com", "User Three", "active", 35);
+            insertUser("user4@test.com", "User Four", "inactive", 40);
+            insertUser("user5@test.com", "User Five", "pending", 22);
+        }
+
+        @Test
+        @DisplayName("having() filters grouped results with equals")
+        void having_filtersWithEquals() {
+            var sql = executor.find(UserEntity.class)
+                .groupBy("status")
+                .having("COUNT(*)", 3)
+                .toBuilder().build().sql();
+            assertTrue(sql.contains("HAVING"));
+            assertTrue(sql.contains("COUNT(*)"));
+        }
+
+        @Test
+        @DisplayName("having() filters with comparison operator")
+        void having_filtersWithOperator() {
+            var sql = executor.find(UserEntity.class)
+                .groupBy("status")
+                .having("COUNT(*)", ">", 1)
+                .toBuilder().build().sql();
+            assertTrue(sql.contains("HAVING"));
+            assertTrue(sql.contains(">"));
+        }
+
+        @Test
+        @DisplayName("havingRaw() adds raw HAVING clause")
+        void havingRaw_addsRawClause() {
+            var sql = executor.find(UserEntity.class)
+                .groupBy("status")
+                .havingRaw("COUNT(*) >= 1")
+                .toBuilder().build().sql();
+            assertTrue(sql.contains("HAVING"));
+            assertTrue(sql.contains("COUNT(*) >= 1"));
+        }
+
+        @Test
+        @DisplayName("havingRaw() with params uses parameterized query")
+        void havingRaw_withParams_usesParameters() {
+            var result = executor.find(UserEntity.class)
+                .groupBy("status")
+                .havingRaw("COUNT(*) > :minCount", java.util.Map.of("minCount", 0))
+                .toBuilder().build();
+            assertTrue(result.sql().contains("HAVING"));
+            // Parameter is renamed by ParameterContext
+            assertTrue(result.parameters().containsValue(0));
+        }
+
+        @Test
+        @DisplayName("orHaving() adds OR condition to HAVING")
+        void orHaving_addsOrCondition() {
+            var sql = executor.find(UserEntity.class)
+                .groupBy("status")
+                .having("COUNT(*)", ">", 2)
+                .orHaving("AVG(age)", ">", 35)
+                .toBuilder().build().sql();
+            assertTrue(sql.contains("HAVING"));
+            assertTrue(sql.contains("OR"));
+        }
+
+        @Test
+        @DisplayName("orHaving() with 2 params uses equals operator")
+        void orHaving_twoParams_usesEquals() {
+            var result = executor.find(UserEntity.class)
+                .groupBy("status")
+                .having("COUNT(*)", ">", 2)
+                .orHaving("COUNT(*)", 1)
+                .toBuilder().build();
+            assertTrue(result.sql().contains("OR"));
+            assertTrue(result.sql().contains("COUNT(*) ="));
+        }
+
+        @Test
+        @DisplayName("orHavingRaw() with parameters")
+        void orHavingRaw_withParameters() {
+            var result = executor.find(UserEntity.class)
+                .groupBy("status")
+                .havingRaw("COUNT(*) > 2")
+                .orHavingRaw("COUNT(*) = :cnt", java.util.Map.of("cnt", 5))
+                .toBuilder().build();
+            assertTrue(result.sql().contains("OR"));
+            assertTrue(result.parameters().containsValue(5));
+        }
+
+        @Test
+        @DisplayName("orHavingRaw() adds raw OR condition")
+        void orHavingRaw_addsRawOrCondition() {
+            var sql = executor.find(UserEntity.class)
+                .groupBy("status")
+                .havingRaw("COUNT(*) > 2")
+                .orHavingRaw("COUNT(*) = 1")
+                .toBuilder().build().sql();
+            assertTrue(sql.contains("HAVING"));
+            assertTrue(sql.contains("OR"));
+        }
+
+        @Test
+        @DisplayName("HAVING methods return this for chaining")
+        void having_returnsThisForChaining() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class).groupBy("status");
+            assertSame(finder, finder.having("COUNT(*)", 5));
+            assertSame(finder, finder.havingRaw("SUM(age) > 0"));
+            assertSame(finder, finder.orHaving("AVG(age)", "<", 50));
+            assertSame(finder, finder.orHavingRaw("MAX(age) < 100"));
+        }
+    }
+
+    // ==================== ADVANCED ORDERING & DISTINCT TESTS ====================
+
+    @Nested
+    @DisplayName("Advanced Ordering and DISTINCT")
+    class AdvancedOrderingTests {
+
+        @BeforeEach
+        void setupOrderingData() {
+            insertUser("alice@test.com", "Alice", "active", 30);
+            insertUser("bob@test.com", "Bob", "pending", 25);
+            insertUser("charlie@test.com", "Charlie", "active", 35);
+        }
+
+        @Test
+        @DisplayName("orderByRaw() adds raw ORDER BY expression")
+        void orderByRaw_addsRawExpression() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .orderByRaw("age DESC")
+                .get();
+            assertEquals(3, results.size());
+            assertEquals("Charlie", results.get(0).getName()); // oldest first
+        }
+
+        @Test
+        @DisplayName("reorder() clears existing orders")
+        void reorder_clearsOrders() {
+            var sql = executor.find(UserEntity.class)
+                .orderBy("name")
+                .reorder()
+                .toBuilder().build().sql();
+            assertFalse(sql.contains("ORDER BY"));
+        }
+
+        @Test
+        @DisplayName("reorder() with column sets new order")
+        void reorder_withColumn_setsNewOrder() {
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .orderBy("name", "asc")
+                .reorder("age", "desc")
+                .get();
+            assertEquals("Charlie", results.get(0).getName()); // reordered by age desc
+        }
+
+        @Test
+        @DisplayName("inRandomOrder() adds random ordering")
+        void inRandomOrder_addsRandomOrdering() {
+            var sql = executor.find(UserEntity.class)
+                .inRandomOrder()
+                .toBuilder().build().sql();
+            assertTrue(sql.contains("RANDOM()") || sql.contains("ORDER BY"));
+        }
+
+        @Test
+        @DisplayName("distinct() enables DISTINCT selection")
+        void distinct_enablesDistinct() {
+            // Insert duplicate status
+            insertUser("dave@test.com", "Dave", "active", 28);
+
+            var sql = executor.find(UserEntity.class)
+                .distinct()
+                .toBuilder().build().sql();
+            assertTrue(sql.contains("DISTINCT"));
+        }
+
+        @Test
+        @DisplayName("latest() orders by default timestamp descending")
+        void latest_ordersByTimestampDesc() {
+            // latest() uses default timestamp column (created_at)
+            var sql = executor.find(UserEntity.class)
+                .latest()
+                .toBuilder().build().sql();
+            assertTrue(sql.contains("ORDER BY"));
+            assertTrue(sql.contains("DESC"));
+        }
+
+        @Test
+        @DisplayName("oldest() orders by default timestamp ascending")
+        void oldest_ordersByTimestampAsc() {
+            // oldest() uses default timestamp column (created_at)
+            var sql = executor.find(UserEntity.class)
+                .oldest()
+                .toBuilder().build().sql();
+            assertTrue(sql.contains("ORDER BY"));
+            assertTrue(sql.contains("ASC"));
+        }
+
+        @Test
+        @DisplayName("Ordering methods return this for chaining")
+        void ordering_returnsThisForChaining() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class);
+            assertSame(finder, finder.orderByRaw("name ASC"));
+            assertSame(finder, finder.reorder());
+            assertSame(finder, finder.reorder("id", "asc"));
+            assertSame(finder, finder.inRandomOrder());
+            assertSame(finder, finder.distinct());
+        }
+    }
+
+    // ==================== SCOPE TESTS ====================
+
+    @Nested
+    @DisplayName("Query Scopes")
+    class ScopeTests {
+
+        @BeforeEach
+        void setupScopeData() {
+            insertUser("active1@test.com", "Active One", "active", 25);
+            insertUser("active2@test.com", "Active Two", "active", 30);
+            insertUser("inactive@test.com", "Inactive User", "inactive", 40);
+        }
+
+        @Test
+        @DisplayName("scope() applies consumer constraint and filters results")
+        void scope_appliesConsumerAndFilters() {
+            java.util.function.Consumer<Finder<UserEntity>> activeScope =
+                f -> f.where("status", "active");
+
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .scope(activeScope)
+                .get();
+            assertEquals(2, results.size());
+            assertTrue(results.stream().allMatch(u -> "active".equals(u.getStatus())));
+        }
+
+        @Test
+        @DisplayName("scope() can be chained with multiple scopes")
+        void scope_canBeChainedMultipleTimes() {
+            java.util.function.Consumer<Finder<UserEntity>> activeScope =
+                f -> f.where("status", "active");
+            java.util.function.Consumer<Finder<UserEntity>> youngScope =
+                f -> f.where("age", "<", 30);
+
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .scope(activeScope)
+                .scope(youngScope)
+                .get();
+            assertEquals(1, results.size());
+            assertEquals("Active One", results.get(0).getName());
+        }
+
+        @Test
+        @DisplayName("scope() returns this for fluent chaining")
+        void scope_returnsThisForChaining() {
+            Finder<UserEntity> finder = executor.find(UserEntity.class);
+            Finder<UserEntity> result = finder.scope(f -> f.where("status", "active"));
+            assertSame(finder, result);
+        }
+
+        @Test
+        @DisplayName("scope() can combine with other query methods")
+        void scope_combinesWithOtherMethods() {
+            java.util.function.Consumer<Finder<UserEntity>> activeScope =
+                f -> f.where("status", "active");
+
+            List<UserEntity> results = executor.find(UserEntity.class)
+                .scope(activeScope)
+                .orderBy("age", "desc")
+                .limit(1)
+                .get();
+            assertEquals(1, results.size());
+            assertEquals("Active Two", results.get(0).getName()); // age 30
+        }
+    }
+
+    // ==================== BATCH OPERATION TESTS ====================
+
+    @Nested
+    @DisplayName("Batch Operations")
+    class BatchOperationTests {
+
+        @Test
+        @DisplayName("increment() returns affected row count")
+        void increment_returnsAffectedRows() {
+            insertUser("test@test.com", "Test", "active", 25);
+
+            int affected = executor.find(UserEntity.class)
+                .where("email", "test@test.com")
+                .increment("age");
+
+            assertEquals(1, affected);
+        }
+
+        @Test
+        @DisplayName("increment() with amount works correctly")
+        void increment_withAmount_works() {
+            insertUser("test@test.com", "Test", "active", 25);
+
+            int affected = executor.find(UserEntity.class)
+                .where("email", "test@test.com")
+                .increment("age", 5);
+
+            assertEquals(1, affected);
+        }
+
+        @Test
+        @DisplayName("decrement() subtracts from column")
+        void decrement_subtractsFromColumn() {
+            insertUser("test@test.com", "Test", "active", 25);
+
+            int affected = executor.find(UserEntity.class)
+                .where("email", "test@test.com")
+                .decrement("age");
+
+            assertEquals(1, affected);
+        }
+
+        @Test
+        @DisplayName("decrement() with amount works correctly")
+        void decrement_withAmount_works() {
+            insertUser("test@test.com", "Test", "active", 25);
+
+            int affected = executor.find(UserEntity.class)
+                .where("email", "test@test.com")
+                .decrement("age", 5);
+
+            assertEquals(1, affected);
+        }
+
+        @Test
+        @DisplayName("increment() without WHERE affects all rows")
+        void increment_withoutWhere_affectsAllRows() {
+            insertUser("user1@test.com", "User1", "active", 20);
+            insertUser("user2@test.com", "User2", "active", 25);
+            insertUser("user3@test.com", "User3", "active", 30);
+
+            // Increment without WHERE clause
+            int affected = executor.find(UserEntity.class)
+                .increment("age", 1);
+
+            assertEquals(3, affected);
+        }
+
+        @Test
+        @DisplayName("increment() with ORDER BY in query extracts WHERE correctly")
+        void increment_withOrderBy_extractsWhereCorrectly() {
+            insertUser("test@test.com", "Test", "active", 25);
+
+            // WHERE clause followed by ORDER BY
+            int affected = executor.find(UserEntity.class)
+                .where("email", "test@test.com")
+                .orderBy("age", "desc")
+                .increment("age", 5);
+
+            assertEquals(1, affected);
+        }
+
+        @Test
+        @DisplayName("chunk() processes records in batches")
+        void chunk_processesInBatches() {
+            for (int i = 0; i < 15; i++) {
+                insertUser("user" + i + "@test.com", "User" + i, "active", 20 + i);
+            }
+
+            java.util.concurrent.atomic.AtomicInteger batchCount = new java.util.concurrent.atomic.AtomicInteger(0);
+            java.util.concurrent.atomic.AtomicInteger totalCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+            executor.find(UserEntity.class)
+                .chunk(5, batch -> {
+                    batchCount.incrementAndGet();
+                    totalCount.addAndGet(batch.size());
+                    return true;
+                });
+
+            assertEquals(3, batchCount.get());
+            assertEquals(15, totalCount.get());
+        }
+
+        @Test
+        @DisplayName("chunk() stops when callback returns false")
+        void chunk_stopsOnFalse() {
+            for (int i = 0; i < 15; i++) {
+                insertUser("user" + i + "@test.com", "User" + i, "active", 20 + i);
+            }
+
+            java.util.concurrent.atomic.AtomicInteger batchCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+            executor.find(UserEntity.class)
+                .chunk(5, batch -> {
+                    batchCount.incrementAndGet();
+                    return batchCount.get() < 2; // Stop after 2 batches
+                });
+
+            assertEquals(2, batchCount.get());
+        }
+
+        @Test
+        @DisplayName("chunk() handles last batch smaller than chunk size")
+        void chunk_handlesPartialLastBatch() {
+            // Insert 7 records - will have batches of 5 and 2
+            for (int i = 0; i < 7; i++) {
+                insertUser("user" + i + "@test.com", "User" + i, "active", 20 + i);
+            }
+
+            java.util.concurrent.atomic.AtomicInteger batchCount = new java.util.concurrent.atomic.AtomicInteger(0);
+            java.util.List<Integer> batchSizes = new java.util.ArrayList<>();
+
+            executor.find(UserEntity.class)
+                .chunk(5, batch -> {
+                    batchCount.incrementAndGet();
+                    batchSizes.add(batch.size());
+                    return true;
+                });
+
+            assertEquals(2, batchCount.get());
+            assertEquals(5, batchSizes.get(0).intValue());
+            assertEquals(2, batchSizes.get(1).intValue()); // Last batch smaller than chunk size
+        }
+    }
+
+    // ==================== FIRST OR CREATE / UPDATE OR CREATE TESTS ====================
+
+    @Nested
+    @DisplayName("FirstOrCreate and UpdateOrCreate Operations")
+    class FirstOrCreateTests {
+
+        @BeforeEach
+        void setupTable() throws SQLException {
+            try (var conn = dataSource.getConnection();
+                 var stmt = conn.createStatement()) {
+                stmt.execute("DROP TABLE IF EXISTS active_record_users");
+                stmt.execute("""
+                    CREATE TABLE active_record_users (
+                        id VARCHAR(36) PRIMARY KEY,
+                        email VARCHAR(255) NOT NULL,
+                        name VARCHAR(255),
+                        status VARCHAR(50),
+                        age INT
+                    )
+                """);
+            }
+            SuprimContext.setGlobalExecutor(executor);
+        }
+
+        @AfterEach
+        void cleanupContext() {
+            SuprimContext.clearGlobalExecutor();
+        }
+
+        @Test
+        @DisplayName("firstOrCreate() returns existing entity when found")
+        void firstOrCreate_returnsExisting_whenFound() {
+            // Insert existing record
+            executor.transaction(tx -> {
+                ActiveRecordUserEntity user = new ActiveRecordUserEntity();
+                user.setEmail("existing@test.com");
+                user.setName("Existing");
+                user.setStatus("active");
+                user.setAge(30);
+                user.save();
+            });
+
+            // Should find existing, not create new
+            ActiveRecordUserEntity result = executor.find(ActiveRecordUserEntity.class)
+                .firstOrCreate(
+                    java.util.Map.of("email", "existing@test.com"),
+                    java.util.Map.of("name", "New Name", "status", "pending")
+                );
+
+            assertEquals("Existing", result.getName()); // Original name, not "New Name"
+            assertEquals("active", result.getStatus());
+        }
+
+        @Test
+        @DisplayName("firstOrCreate() creates new entity when not found")
+        void firstOrCreate_createsNew_whenNotFound() {
+            ActiveRecordUserEntity result = executor.find(ActiveRecordUserEntity.class)
+                .firstOrCreate(
+                    java.util.Map.of("email", "new@test.com"),
+                    java.util.Map.of("name", "New User", "status", "active", "age", 25)
+                );
+
+            assertNotNull(result.getId());
+            assertEquals("new@test.com", result.getEmail());
+            assertEquals("New User", result.getName());
+            assertEquals("active", result.getStatus());
+            assertEquals(25, result.getAge());
+        }
+
+        @Test
+        @DisplayName("updateOrCreate() updates existing entity")
+        void updateOrCreate_updatesExisting() {
+            // Insert existing record
+            executor.transaction(tx -> {
+                ActiveRecordUserEntity user = new ActiveRecordUserEntity();
+                user.setEmail("update@test.com");
+                user.setName("Original");
+                user.setStatus("active");
+                user.setAge(30);
+                user.save();
+            });
+
+            // Should update existing
+            ActiveRecordUserEntity result = executor.find(ActiveRecordUserEntity.class)
+                .updateOrCreate(
+                    java.util.Map.of("email", "update@test.com"),
+                    java.util.Map.of("name", "Updated", "status", "inactive")
+                );
+
+            assertEquals("Updated", result.getName());
+            assertEquals("inactive", result.getStatus());
+        }
+
+        @Test
+        @DisplayName("updateOrCreate() creates new entity when not found")
+        void updateOrCreate_createsNew_whenNotFound() {
+            ActiveRecordUserEntity result = executor.find(ActiveRecordUserEntity.class)
+                .updateOrCreate(
+                    java.util.Map.of("email", "brandnew@test.com"),
+                    java.util.Map.of("name", "Brand New", "status", "pending", "age", 20)
+                );
+
+            assertNotNull(result.getId());
+            assertEquals("brandnew@test.com", result.getEmail());
+            assertEquals("Brand New", result.getName());
+        }
+
+        @Test
+        @DisplayName("firstOrCreate() ignores unknown fields in values map")
+        void firstOrCreate_ignoresUnknownFields() {
+            // firstOrCreate with an unknown field should ignore it silently
+            ActiveRecordUserEntity result = executor.find(ActiveRecordUserEntity.class)
+                .firstOrCreate(
+                    java.util.Map.of("email", "unknown@test.com"),
+                    java.util.Map.of("name", "Test", "unknownField", "ignored")
+                );
+
+            assertNotNull(result.getId());
+            assertEquals("unknown@test.com", result.getEmail());
+            assertEquals("Test", result.getName());
+        }
+
+        @Test
+        @DisplayName("updateOrCreate() ignores unknown fields in values map")
+        void updateOrCreate_ignoresUnknownFields() {
+            // updateOrCreate with an unknown field should ignore it silently
+            ActiveRecordUserEntity result = executor.find(ActiveRecordUserEntity.class)
+                .updateOrCreate(
+                    java.util.Map.of("email", "unknown2@test.com"),
+                    java.util.Map.of("name", "Test2", "nonExistentField", "ignored")
+                );
+
+            assertNotNull(result.getId());
+            assertEquals("unknown2@test.com", result.getEmail());
+            assertEquals("Test2", result.getName());
+        }
+
+        @Test
+        @DisplayName("firstOrCreate() uses field name when column annotation name doesn't match")
+        void firstOrCreate_usesFieldName_whenColumnNameMismatch() throws SQLException {
+            // Create table with different column names than field names
+            try (var conn = dataSource.getConnection();
+                 var stmt = conn.createStatement()) {
+                stmt.execute("DROP TABLE IF EXISTS field_name_test");
+                stmt.execute("""
+                    CREATE TABLE field_name_test (
+                        id VARCHAR(36) PRIMARY KEY,
+                        user_email VARCHAR(255),
+                        user_name VARCHAR(255)
+                    )
+                """);
+            }
+
+            // firstOrCreate using field names instead of column names
+            FieldNameTestEntity result = executor.find(FieldNameTestEntity.class)
+                .firstOrCreate(
+                    java.util.Map.of("user_email", "test@test.com"),  // column name
+                    java.util.Map.of("userName", "Test User")  // field name (not column name)
+                );
+
+            assertNotNull(result.getId());
+            assertEquals("test@test.com", result.getEmail());
+            assertEquals("Test User", result.getUserName());
+
+            // Cleanup
+            try (var conn = dataSource.getConnection();
+                 var stmt = conn.createStatement()) {
+                stmt.execute("DROP TABLE IF EXISTS field_name_test");
+            }
+        }
+    }
+
     // ==================== TEST ENTITIES ====================
 
     @Entity(table = "permissions")
@@ -2322,5 +3047,63 @@ class FinderTest {
         public String getName() { return name; }
         public LocalDateTime getEventTime() { return eventTime; }
         public java.time.LocalDate getEventDate() { return eventDate; }
+    }
+
+    /**
+     * Entity extending SuprimEntity for firstOrCreate/updateOrCreate tests.
+     */
+    @Entity(table = "active_record_users")
+    public static class ActiveRecordUserEntity extends SuprimEntity {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id", type = SqlType.VARCHAR)
+        private String id;
+
+        @Column(name = "email", type = SqlType.VARCHAR)
+        private String email;
+
+        @Column(name = "name", type = SqlType.VARCHAR)
+        private String name;
+
+        @Column(name = "status", type = SqlType.VARCHAR)
+        private String status;
+
+        @Column(name = "age", type = SqlType.INTEGER)
+        private Integer age;
+
+        public ActiveRecordUserEntity() {}
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+        public Integer getAge() { return age; }
+        public void setAge(Integer age) { this.age = age; }
+    }
+
+    /**
+     * Entity with field names different from column names for setFieldValue testing.
+     */
+    @Entity(table = "field_name_test")
+    public static class FieldNameTestEntity extends SuprimEntity {
+        @Id(strategy = GenerationType.UUID_V7)
+        @Column(name = "id", type = SqlType.VARCHAR)
+        private String id;
+
+        @Column(name = "user_email", type = SqlType.VARCHAR)
+        private String email;
+
+        @Column(name = "user_name", type = SqlType.VARCHAR)
+        private String userName;  // field name differs from column name
+
+        public FieldNameTestEntity() {}
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+        public String getUserName() { return userName; }
+        public void setUserName(String userName) { this.userName = userName; }
     }
 }

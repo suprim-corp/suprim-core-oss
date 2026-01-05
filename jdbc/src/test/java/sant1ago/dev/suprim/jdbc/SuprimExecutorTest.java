@@ -505,6 +505,196 @@ class SuprimExecutorTest {
         @Override public boolean isWrapperFor(Class<?> iface) { return false; }
     }
 
+    // ==================== BUILDER TESTS ====================
+
+    @Nested
+    @DisplayName("Builder pattern tests")
+    class BuilderTests {
+
+        @Test
+        @DisplayName("builder creates executor with connectionName")
+        void builder_createsExecutorWithConnectionName() {
+            SuprimExecutor builtExecutor = SuprimExecutor.builder(dataSource)
+                .connectionName("test-connection")
+                .build();
+
+            assertNotNull(builtExecutor);
+            assertEquals("test-connection", builtExecutor.getConnectionName());
+        }
+
+        @Test
+        @DisplayName("builder with onQuery listener fires on query")
+        void builder_withOnQueryListener_firesOnQuery() {
+            java.util.concurrent.atomic.AtomicBoolean listenerFired = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+            SuprimExecutor builtExecutor = SuprimExecutor.builder(dataSource)
+                .onQuery(event -> listenerFired.set(true))
+                .build();
+
+            builtExecutor.query(
+                new QueryResult("SELECT 1", Map.of()),
+                rs -> rs.getInt(1)
+            );
+
+            assertTrue(listenerFired.get());
+        }
+
+        @Test
+        @DisplayName("builder with onSlowQuery listener fires for slow queries")
+        void builder_withOnSlowQueryListener_firesForSlowQueries() {
+            java.util.concurrent.atomic.AtomicBoolean listenerFired = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+            SuprimExecutor builtExecutor = SuprimExecutor.builder(dataSource)
+                .onSlowQuery(0, event -> listenerFired.set(true)) // 0ms threshold - always fires
+                .build();
+
+            builtExecutor.query(
+                new QueryResult("SELECT 1", Map.of()),
+                rs -> rs.getInt(1)
+            );
+
+            assertTrue(listenerFired.get());
+        }
+
+        @Test
+        @DisplayName("builder with onQueryError listener fires on error")
+        void builder_withOnQueryErrorListener_firesOnError() {
+            java.util.concurrent.atomic.AtomicBoolean listenerFired = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+            SuprimExecutor builtExecutor = SuprimExecutor.builder(dataSource)
+                .onQueryError(event -> listenerFired.set(true))
+                .build();
+
+            try {
+                builtExecutor.query(
+                    new QueryResult("SELECT * FROM nonexistent_table", Map.of()),
+                    rs -> rs.getInt(1)
+                );
+            } catch (Exception ignored) {}
+
+            assertTrue(listenerFired.get());
+        }
+
+        @Test
+        @DisplayName("builder throws on null dataSource")
+        void builder_nullDataSource_throwsNPE() {
+            assertThrows(NullPointerException.class, () ->
+                SuprimExecutor.builder(null)
+            );
+        }
+    }
+
+    // ==================== LISTENER MANAGEMENT TESTS ====================
+
+    @Nested
+    @DisplayName("Listener management tests")
+    class ListenerManagementTests {
+
+        @Test
+        @DisplayName("addQueryListener adds listener at runtime")
+        void addQueryListener_addsListenerAtRuntime() {
+            java.util.concurrent.atomic.AtomicBoolean listenerFired = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+            executor.addQueryListener(sant1ago.dev.suprim.jdbc.event.QueryListener.onQuery(
+                event -> listenerFired.set(true)
+            ));
+
+            executor.query(
+                new QueryResult("SELECT 1", Map.of()),
+                rs -> rs.getInt(1)
+            );
+
+            assertTrue(listenerFired.get());
+        }
+
+        @Test
+        @DisplayName("removeQueryListener removes listener")
+        void removeQueryListener_removesListener() {
+            java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+            sant1ago.dev.suprim.jdbc.event.QueryListener listener =
+                sant1ago.dev.suprim.jdbc.event.QueryListener.onQuery(event -> callCount.incrementAndGet());
+
+            executor.addQueryListener(listener);
+
+            // First query should fire listener
+            executor.query(new QueryResult("SELECT 1", Map.of()), rs -> rs.getInt(1));
+            assertEquals(1, callCount.get());
+
+            // Remove listener
+            boolean removed = executor.removeQueryListener(listener);
+            assertTrue(removed);
+
+            // Second query should not fire listener
+            executor.query(new QueryResult("SELECT 1", Map.of()), rs -> rs.getInt(1));
+            assertEquals(1, callCount.get());
+        }
+
+        @Test
+        @DisplayName("addTransactionListener adds listener at runtime")
+        void addTransactionListener_addsListenerAtRuntime() {
+            java.util.concurrent.atomic.AtomicBoolean listenerFired = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+            executor.addTransactionListener(new sant1ago.dev.suprim.jdbc.event.TransactionListener() {
+                @Override
+                public void onBegin(sant1ago.dev.suprim.jdbc.event.TransactionEvent event) {
+                    listenerFired.set(true);
+                }
+            });
+
+            // Transaction listener fires on transaction begin, so we just need to start a tx
+            executor.transaction(tx -> {
+                // Empty transaction - listener fires on begin
+            });
+
+            assertTrue(listenerFired.get());
+        }
+
+        @Test
+        @DisplayName("removeTransactionListener removes listener")
+        void removeTransactionListener_removesListener() {
+            java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+            sant1ago.dev.suprim.jdbc.event.TransactionListener listener = new sant1ago.dev.suprim.jdbc.event.TransactionListener() {
+                @Override
+                public void onBegin(sant1ago.dev.suprim.jdbc.event.TransactionEvent event) {
+                    callCount.incrementAndGet();
+                }
+            };
+
+            executor.addTransactionListener(listener);
+
+            // First transaction should fire listener
+            executor.transaction(tx -> {});
+            int countAfterFirst = callCount.get();
+            assertTrue(countAfterFirst > 0);
+
+            // Remove listener
+            boolean removed = executor.removeTransactionListener(listener);
+            assertTrue(removed);
+
+            // Second transaction should not fire listener
+            executor.transaction(tx -> {});
+            assertEquals(countAfterFirst, callCount.get());
+        }
+    }
+
+    // ==================== STATIC RELATIONSHIPS METHOD TEST ====================
+
+    @Nested
+    @DisplayName("Static relationships method tests")
+    class StaticRelationshipsTests {
+
+        @Test
+        @DisplayName("relationships static method returns RelationshipManager")
+        void relationships_returnsRelationshipManager() {
+            executor.transaction(tx -> {
+                RelationshipManager rm = SuprimExecutor.relationships(tx);
+                assertNotNull(rm);
+            });
+        }
+    }
+
     /**
      * DataSource that returns a connection which throws on setAutoCommit().
      */
